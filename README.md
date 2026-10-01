@@ -1,36 +1,37 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# PDV Mercado
 
-## Getting Started
+Aplicação web de Ponto de Venda para supermercado.
 
-First, run the development server:
+## Stack
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+- Next.js (App Router) + TypeScript + Tailwind CSS
+- PostgreSQL + Prisma
+- Auth.js (NextAuth v5) com JWT
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Setup
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+1. Instale dependências: `npm install`
+2. Suba o banco: `npm run db:up` (requer Docker)
+3. Aplique migrations: `npx prisma migrate dev`
+4. Popule usuários de teste: `npm run db:seed`
+5. Rode a app: `npm run dev`
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Variáveis de ambiente: copie `.env.example` para `.env`.
 
-## Learn More
+## Usuários de teste (seed)
 
-To learn more about Next.js, take a look at the following resources:
+| E-mail | Senha | Destino |
+|--------|--------|---------|
+| `admin@pdv.local` | `admin123` | `/admin/dashboard` |
+| `operador@pdv.local` | `operador123` | `/pdv` |
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Scripts úteis
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+| Comando | Descrição |
+|---------|-----------|
+| `npm run dev` | Servidor de desenvolvimento |
+| `npm run db:up` | Sobe PostgreSQL (Docker Compose) |
+| `npm run db:down` | Para o PostgreSQL |
+| `npm run db:migrate` | Cria/aplica migrations |
+| `npm run db:seed` | Cria admin e operador de teste |
+| `npm run db:studio` | Abre Prisma Studio |

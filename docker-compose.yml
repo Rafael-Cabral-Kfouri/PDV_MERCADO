@@ -1,0 +1,16 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: pdv_mercado_db
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: pdv
+      POSTGRES_PASSWORD: pdv_secret
+      POSTGRES_DB: pdv_mercado
+    volumes:
+      - pdv_postgres_data:/var/lib/postgresql/data
+
+volumes:
+  pdv_postgres_data:
