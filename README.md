@@ -29,8 +29,11 @@ Aplicação web de Ponto de Venda para supermercado.
 
 1. Clone o repositório (ou copie a pasta do projeto)
 2. Dê duplo clique em **`editar-env.bat`** e ajuste `DATABASE_URL` / `AUTH_SECRET`
-3. Dê duplo clique em **`instalar-pdv.bat`** (só na primeira vez)
-4. No dia a dia: duplo clique em **`iniciar-pdv.bat`**
+3. No pgAdmin, crie o banco **`pdv_mercado`** (se ainda não existir)
+4. Dê duplo clique em **`instalar-pdv.bat`** (só na primeira vez)
+5. No dia a dia: duplo clique em **`iniciar-pdv.bat`**
+
+Se o `instalar-pdv.bat` falhar no meio das migrations: no pgAdmin apague o banco `pdv_mercado`, crie de novo e rode `instalar-pdv.bat` outra vez.
 
 O navegador abre em `http://localhost:3000`.
 
