@@ -4,8 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "prisma generate && next build",
-    "start": "next start",
+    "build": "prisma generate && next build --webpack",
+    "start": "prisma generate && next start",
     "lint": "eslint",
     "db:up": "docker compose up -d",
     "db:down": "docker compose down",

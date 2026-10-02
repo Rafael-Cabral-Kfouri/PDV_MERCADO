@@ -21,6 +21,14 @@ if not exist ".env" (
   exit /b 1
 )
 
+echo Garantindo Prisma Client...
+call npx prisma generate
+if errorlevel 1 (
+  echo [ERRO] prisma generate falhou. Confira o .env e rode instalar-pdv.bat.
+  pause
+  exit /b 1
+)
+
 if not exist ".next" (
   echo [AVISO] Build nao encontrado. Rodando npm run build...
   call npm run build
@@ -32,6 +40,7 @@ if not exist ".next" (
 )
 
 echo Aguarde o servidor subir. O navegador abrira em alguns segundos.
+echo Se aparecer erro de @prisma/client-..., rode reconstruir-pdv.bat.
 echo Para encerrar o PDV, feche esta janela ^(Ctrl+C^).
 echo.
 

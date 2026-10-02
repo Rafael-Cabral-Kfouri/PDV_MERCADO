@@ -44,8 +44,11 @@ O navegador abre em `http://localhost:3000`.
 | `editar-env.bat` | Criar/editar o `.env` |
 | `instalar-pdv.bat` | Primeira instalação (dependências, migrate, seed, build) |
 | `iniciar-pdv.bat` | Ligar o PDV em produção |
+| `reconstruir-pdv.bat` | Refazer o build (ex.: erro `@prisma/client-...`) |
 
 Para subir junto com o Windows: Agendador de Tarefas → ao logon → executar `iniciar-pdv.bat`.
+
+Se o `iniciar-pdv.bat` falhar com `Cannot find module '@prisma/client-...'`, rode **`reconstruir-pdv.bat`** e depois `iniciar-pdv.bat` de novo.
 
 ## Usuários iniciais (seed)
 
