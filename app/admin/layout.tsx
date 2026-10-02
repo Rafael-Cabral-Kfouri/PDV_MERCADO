@@ -5,6 +5,7 @@ import { ToastProvider } from "@/components/ui/toast";
 
 const navItems = [
   { href: "/admin/dashboard", label: "Painel" },
+  { href: "/admin/vendas", label: "Vendas" },
   { href: "/admin/produtos", label: "Produtos" },
   { href: "/admin/funcionarios", label: "Funcionários" },
   { href: "/admin/configuracoes", label: "Configurações" },

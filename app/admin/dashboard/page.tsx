@@ -9,11 +9,21 @@ export default function AdminDashboardPage() {
       <div>
         <h2 className="text-2xl font-semibold text-zinc-900">Painel de Controle</h2>
         <p className="mt-1 text-zinc-600">
-          Gerencie produtos, funcionários e recibo do mercado.
+          Gerencie vendas, produtos, funcionários e recibo do mercado.
         </p>
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <Link
+          href="/admin/vendas"
+          className="rounded-xl border border-zinc-200 bg-white p-6 shadow-sm transition hover:border-emerald-300"
+        >
+          <h3 className="text-lg font-semibold text-zinc-900">Vendas</h3>
+          <p className="mt-2 text-sm text-zinc-600">
+            Relatórios por período/mês, resumo, lista de vendas e ranking de
+            produtos.
+          </p>
+        </Link>
         <Link
           href="/admin/produtos"
           className="rounded-xl border border-zinc-200 bg-white p-6 shadow-sm transition hover:border-emerald-300"
