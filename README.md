@@ -56,6 +56,10 @@ Após `git pull` com mudanças de banco, rode `npx prisma migrate deploy` (ou `i
 
 No admin → Produtos, marque **Quilo (kg)** e informe o preço por kg. No caixa, ao bipar esse produto, o PDV pede o peso (balança externa) e calcula o total automaticamente.
 
+### Importar NF-e (XML)
+
+No admin → Produtos, use **Importar nota fiscal (XML)** para enviar o XML da NF-e/NFC-e de compra. O sistema lista os itens para revisão (nome, código, quantidade, preço de venda). Ao confirmar, produtos novos são cadastrados e os já existentes recebem a quantidade no estoque. O valor da nota é tratado como custo — ajuste o preço de venda antes de importar. Use o XML (não o PDF).
+
 ## Usuários iniciais (seed)
 
 | E-mail | Senha | Destino |

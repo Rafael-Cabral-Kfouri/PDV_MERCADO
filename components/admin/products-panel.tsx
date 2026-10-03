@@ -9,6 +9,7 @@ import {
   type ActionResult,
 } from "@/lib/actions/products";
 import { formatCurrencyBRL, formatQuantidade, maskCurrencyInput } from "@/lib/format";
+import { NfeImportPanel } from "@/components/admin/nfe-import-panel";
 import { BarcodeInput } from "@/components/ui/barcode-input";
 import { useToast } from "@/components/ui/toast";
 import type { UnidadeVenda } from "@prisma/client";
@@ -162,6 +163,8 @@ export function ProductsPanel({ produtos }: { produtos: ProductRow[] }) {
 
   return (
     <div className="flex flex-col gap-8">
+      <NfeImportPanel />
+
       <section className="rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">
         <h2 className="text-lg font-semibold text-zinc-900">
           {form.id ? "Editar produto" : "Cadastrar produto"}

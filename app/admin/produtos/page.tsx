@@ -22,8 +22,8 @@ export default async function AdminProdutosPage() {
       <div>
         <h2 className="text-2xl font-semibold text-zinc-900">Produtos</h2>
         <p className="mt-1 text-sm text-zinc-600">
-          Cadastre por unidade ou por kg (hortifruti). Use código de barras ou
-          código interno.
+          Cadastre por unidade ou por kg (hortifruti), ou importe o XML da NF-e
+          de compra. Use código de barras ou código interno.
         </p>
       </div>
       <ProductsPanel produtos={rows} />
