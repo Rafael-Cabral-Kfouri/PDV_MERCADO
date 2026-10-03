@@ -1,11 +1,13 @@
-import { formatCurrencyBRL } from "@/lib/format";
+import { formatCurrencyBRL, formatQuantidade } from "@/lib/format";
 import type { StoreSettingsDTO } from "@/lib/actions/settings";
+import type { UnidadeVenda } from "@prisma/client";
 
 export type ReceiptItem = {
   quantidade: number;
   nome: string;
   precoUnitario: number;
   precoTotal: number;
+  unidadeVenda?: UnidadeVenda;
 };
 
 export type ReceiptData = {
@@ -77,9 +79,14 @@ export function ThermalReceipt({
           <tbody>
             {itens.map((item, idx) => (
               <tr key={`${item.nome}-${idx}`}>
-                <td className="col-qtd">{item.quantidade}</td>
+                <td className="col-qtd">
+                  {formatQuantidade(item.quantidade, item.unidadeVenda ?? "UNIDADE")}
+                </td>
                 <td className="col-desc">{item.nome}</td>
-                <td className="col-val">{formatCurrencyBRL(item.precoUnitario)}</td>
+                <td className="col-val">
+                  {formatCurrencyBRL(item.precoUnitario)}
+                  {item.unidadeVenda === "KG" ? "/kg" : ""}
+                </td>
                 <td className="col-val">{formatCurrencyBRL(item.precoTotal)}</td>
               </tr>
             ))}

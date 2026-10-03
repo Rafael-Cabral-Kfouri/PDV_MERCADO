@@ -9,7 +9,7 @@ import {
   type RelatorioFiltros,
   type RelatorioVendas,
 } from "@/lib/actions/sales-report";
-import { formatCurrencyBRL } from "@/lib/format";
+import { formatCurrencyBRL, formatQuantidade } from "@/lib/format";
 
 const FORMA_LABEL: Record<PaymentMethod, string> = {
   DINHEIRO: "Dinheiro",
@@ -428,7 +428,10 @@ export function SalesReportPanel({
                                       </span>
                                     </td>
                                     <td className="py-1 text-right text-zinc-700">
-                                      {item.quantidade}
+                                      {formatQuantidade(
+                                        item.quantidade,
+                                        item.unidadeVenda,
+                                      )}
                                     </td>
                                     <td className="py-1 text-right text-zinc-700">
                                       {formatCurrencyBRL(item.precoUnitario)}
@@ -489,7 +492,9 @@ export function SalesReportPanel({
                         {row.codigoBarras}
                       </span>
                     </td>
-                    <td className="px-4 py-2 text-right">{row.quantidade}</td>
+                    <td className="px-4 py-2 text-right">
+                      {formatQuantidade(row.quantidade, row.unidadeVenda)}
+                    </td>
                     <td className="px-4 py-2 text-right font-medium">
                       {formatCurrencyBRL(row.faturamento)}
                     </td>

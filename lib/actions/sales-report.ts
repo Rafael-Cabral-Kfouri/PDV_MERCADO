@@ -1,6 +1,6 @@
 "use server";
 
-import { PaymentMethod, SaleStatus } from "@prisma/client";
+import { PaymentMethod, SaleStatus, UnidadeVenda } from "@prisma/client";
 import { requireAdmin } from "@/lib/auth-guards";
 import { prisma } from "@/lib/prisma";
 
@@ -49,6 +49,7 @@ export type VendaRelatorioRow = {
     quantidade: number;
     precoUnitario: number;
     precoTotal: number;
+    unidadeVenda: UnidadeVenda;
   }[];
 };
 
@@ -58,6 +59,7 @@ export type RankingProdutoRow = {
   codigoBarras: string;
   quantidade: number;
   faturamento: number;
+  unidadeVenda: UnidadeVenda;
 };
 
 export type RelatorioVendas = {
@@ -310,7 +312,9 @@ export async function obterRelatorioVendas(
         operador: { select: { nome: true } },
         itens: {
           include: {
-            produto: { select: { nome: true, codigoBarras: true } },
+            produto: {
+              select: { nome: true, codigoBarras: true, unidadeVenda: true },
+            },
           },
         },
       },
@@ -322,7 +326,9 @@ export async function obterRelatorioVendas(
         produtoId: true,
         quantidade: true,
         precoTotal: true,
-        produto: { select: { nome: true, codigoBarras: true } },
+        produto: {
+          select: { nome: true, codigoBarras: true, unidadeVenda: true },
+        },
       },
     }),
   ]);
@@ -352,9 +358,10 @@ export async function obterRelatorioVendas(
     itens: v.itens.map((i) => ({
       produtoNome: i.produto.nome,
       codigoBarras: i.produto.codigoBarras,
-      quantidade: i.quantidade,
+      quantidade: Number(i.quantidade),
       precoUnitario: Number(i.precoUnitario),
       precoTotal: Number(i.precoTotal),
+      unidadeVenda: i.produto.unidadeVenda,
     })),
   }));
 
@@ -363,17 +370,19 @@ export async function obterRelatorioVendas(
     RankingProdutoRow
   >();
   for (const item of itensRaw) {
+    const qty = Number(item.quantidade);
     const atual = rankingMap.get(item.produtoId);
     if (atual) {
-      atual.quantidade += item.quantidade;
+      atual.quantidade += qty;
       atual.faturamento += Number(item.precoTotal);
     } else {
       rankingMap.set(item.produtoId, {
         produtoId: item.produtoId,
         nome: item.produto.nome,
         codigoBarras: item.produto.codigoBarras,
-        quantidade: item.quantidade,
+        quantidade: qty,
         faturamento: Number(item.precoTotal),
+        unidadeVenda: item.produto.unidadeVenda,
       });
     }
   }

@@ -1,5 +1,6 @@
 "use server";
 
+import type { UnidadeVenda } from "@prisma/client";
 import { requireAuth } from "@/lib/auth-guards";
 import { prisma } from "@/lib/prisma";
 
@@ -9,8 +10,35 @@ export type PdvProduct = {
   codigoBarras: string;
   precoUnitario: number;
   quantidadeEstoque: number;
+  unidadeVenda: UnidadeVenda;
   fotoUrl: string | null;
 };
+
+/**
+ * Mapeia o registro Prisma para o DTO usado na tela do PDV.
+ *
+ * @param produto - Linha de Product do banco.
+ * @returns Produto com números JS e unidade de venda.
+ */
+function toPdvProduct(produto: {
+  id: string;
+  nome: string;
+  codigoBarras: string;
+  precoUnitario: { toString(): string } | number;
+  quantidadeEstoque: { toString(): string } | number;
+  unidadeVenda: UnidadeVenda;
+  fotoUrl: string | null;
+}): PdvProduct {
+  return {
+    id: produto.id,
+    nome: produto.nome,
+    codigoBarras: produto.codigoBarras,
+    precoUnitario: Number(produto.precoUnitario),
+    quantidadeEstoque: Number(produto.quantidadeEstoque),
+    unidadeVenda: produto.unidadeVenda,
+    fotoUrl: produto.fotoUrl,
+  };
+}
 
 /**
  * Busca um produto pelo código de barras exato (bipagem / Enter no código).
@@ -31,14 +59,7 @@ export async function buscarProdutoPorCodigo(
 
   if (!produto) return null;
 
-  return {
-    id: produto.id,
-    nome: produto.nome,
-    codigoBarras: produto.codigoBarras,
-    precoUnitario: Number(produto.precoUnitario),
-    quantidadeEstoque: produto.quantidadeEstoque,
-    fotoUrl: produto.fotoUrl,
-  };
+  return toPdvProduct(produto);
 }
 
 /**
@@ -68,12 +89,5 @@ export async function buscarProdutosSugestao(
     take: limite,
   });
 
-  return produtos.map((p) => ({
-    id: p.id,
-    nome: p.nome,
-    codigoBarras: p.codigoBarras,
-    precoUnitario: Number(p.precoUnitario),
-    quantidadeEstoque: p.quantidadeEstoque,
-    fotoUrl: p.fotoUrl,
-  }));
+  return produtos.map(toPdvProduct);
 }

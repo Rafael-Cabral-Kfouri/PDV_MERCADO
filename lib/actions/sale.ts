@@ -1,6 +1,6 @@
 "use server";
 
-import { Prisma, PaymentMethod, SaleStatus } from "@prisma/client";
+import { Prisma, PaymentMethod, SaleStatus, UnidadeVenda } from "@prisma/client";
 import { requireAuth } from "@/lib/auth-guards";
 import { prisma } from "@/lib/prisma";
 
@@ -26,6 +26,24 @@ export type FinalizarVendaResult = {
   total?: number;
   troco?: number;
 };
+
+/**
+ * Valida quantidade conforme a unidade de venda do produto.
+ *
+ * @param quantidade - Quantidade enviada pelo PDV.
+ * @param unidadeVenda - `UNIDADE` (inteiro) ou `KG` (decimal > 0).
+ * @returns `true` se a quantidade for válida.
+ */
+function quantidadeValida(
+  quantidade: number,
+  unidadeVenda: UnidadeVenda,
+): boolean {
+  if (!Number.isFinite(quantidade) || quantidade <= 0) return false;
+  if (unidadeVenda === UnidadeVenda.UNIDADE) {
+    return Number.isInteger(quantidade);
+  }
+  return quantidade <= 999999;
+}
 
 /**
  * Finaliza a venda: valida estoque, persiste Sale/SaleItem, dá baixa no estoque.
@@ -58,14 +76,15 @@ export async function finalizarVendaAction(
     }
 
     for (const item of input.itens) {
-      if (!item.produtoId || item.quantidade < 1 || item.precoUnitario < 0) {
+      if (!item.produtoId || item.precoUnitario < 0 || !Number.isFinite(item.quantidade)) {
         return { ok: false, message: "Itens da venda inválidos." };
       }
     }
 
-    const total = input.itens.reduce(
-      (acc, i) => acc + i.quantidade * i.precoUnitario,
-      0,
+    const total = Number(
+      input.itens
+        .reduce((acc, i) => acc + i.quantidade * i.precoUnitario, 0)
+        .toFixed(2),
     );
 
     let troco = 0;
@@ -88,7 +107,6 @@ export async function finalizarVendaAction(
         throw new Error("Código de venda já utilizado. Inicie uma nova venda (F2).");
       }
 
-      // Reserva/baixa de estoque com condição atômica
       for (const item of input.itens) {
         const produto = await tx.product.findUnique({
           where: { id: item.produtoId },
@@ -96,19 +114,35 @@ export async function finalizarVendaAction(
         if (!produto) {
           throw new Error("Produto não encontrado no estoque.");
         }
-        if (produto.quantidadeEstoque < item.quantidade) {
+
+        const qty = Number(
+          item.quantidade.toFixed(
+            produto.unidadeVenda === UnidadeVenda.KG ? 3 : 0,
+          ),
+        );
+        if (!quantidadeValida(qty, produto.unidadeVenda)) {
           throw new Error(
-            `Estoque insuficiente para "${produto.nome}" (disponível: ${produto.quantidadeEstoque}, pedido: ${item.quantidade}).`,
+            produto.unidadeVenda === UnidadeVenda.KG
+              ? `Peso inválido para "${produto.nome}".`
+              : `Quantidade inválida para "${produto.nome}".`,
           );
         }
 
+        const estoque = Number(produto.quantidadeEstoque);
+        if (estoque < qty) {
+          throw new Error(
+            `Estoque insuficiente para "${produto.nome}" (disponível: ${estoque}, pedido: ${qty}).`,
+          );
+        }
+
+        const qtyDecimal = new Prisma.Decimal(qty.toFixed(3));
         const updated = await tx.product.updateMany({
           where: {
             id: item.produtoId,
-            quantidadeEstoque: { gte: item.quantidade },
+            quantidadeEstoque: { gte: qtyDecimal },
           },
           data: {
-            quantidadeEstoque: { decrement: item.quantidade },
+            quantidadeEstoque: { decrement: qtyDecimal },
           },
         });
         if (updated.count === 0) {
@@ -126,14 +160,17 @@ export async function finalizarVendaAction(
           status: SaleStatus.CONCLUIDA,
           operadorId: session.user.id,
           itens: {
-            create: input.itens.map((item) => ({
-              produtoId: item.produtoId,
-              quantidade: item.quantidade,
-              precoUnitario: new Prisma.Decimal(item.precoUnitario.toFixed(2)),
-              precoTotal: new Prisma.Decimal(
-                (item.quantidade * item.precoUnitario).toFixed(2),
-              ),
-            })),
+            create: input.itens.map((item) => {
+              const qty = Number(item.quantidade.toFixed(3));
+              return {
+                produtoId: item.produtoId,
+                quantidade: new Prisma.Decimal(qty.toFixed(3)),
+                precoUnitario: new Prisma.Decimal(item.precoUnitario.toFixed(2)),
+                precoTotal: new Prisma.Decimal(
+                  (qty * item.precoUnitario).toFixed(2),
+                ),
+              };
+            }),
           },
         },
       });

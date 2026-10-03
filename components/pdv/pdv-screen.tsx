@@ -9,18 +9,20 @@ import {
 } from "@/lib/actions/pdv";
 import { finalizarVendaAction } from "@/lib/actions/sale";
 import { logoutAction } from "@/lib/actions/auth";
-import { formatCurrencyBRL } from "@/lib/format";
+import { formatCurrencyBRL, formatQuantidade } from "@/lib/format";
 import {
   gerarCodigoVenda,
   parseQtyPrefix,
   pareceCodigoBarras,
 } from "@/lib/pdv-utils";
 import { PaymentModal } from "@/components/pdv/payment-modal";
+import { WeightModal } from "@/components/pdv/weight-modal";
 import {
   SaleSuccessModal,
   type SaleSuccessInfo,
 } from "@/components/pdv/sale-success-modal";
 import type { StoreSettingsDTO } from "@/lib/actions/settings";
+import type { UnidadeVenda } from "@prisma/client";
 
 export type CartItem = {
   lineId: string;
@@ -29,6 +31,7 @@ export type CartItem = {
   nome: string;
   quantidade: number;
   precoUnitario: number;
+  unidadeVenda: UnidadeVenda;
 };
 
 type PdvScreenProps = {
@@ -63,13 +66,18 @@ export function PdvScreen({ operadorNome, isAdmin, loja }: PdvScreenProps) {
   const [buscando, setBuscando] = useState(false);
   const [ultimoProduto, setUltimoProduto] = useState<PdvProduct | null>(null);
   const [modalPagamento, setModalPagamento] = useState(false);
+  const [pesoPendente, setPesoPendente] = useState<{
+    produto: PdvProduct;
+    pesoSugerido: number;
+  } | null>(null);
   const [sucesso, setSucesso] = useState<SaleSuccessInfo | null>(null);
   const [pending, startTransition] = useTransition();
   const inputRef = useRef<HTMLInputElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const caixaOcupado = codigoVenda !== null;
-  const modalAberto = modalPagamento || sucesso !== null;
+  const modalAberto =
+    modalPagamento || sucesso !== null || pesoPendente !== null;
 
   const totalGeral = useMemo(
     () =>
@@ -102,6 +110,7 @@ export function PdvScreen({ operadorNome, isAdmin, loja }: PdvScreenProps) {
   const iniciarVenda = useCallback(() => {
     setSucesso(null);
     setModalPagamento(false);
+    setPesoPendente(null);
     setCodigoVenda(gerarCodigoVenda());
     setItens([]);
     setInput("");
@@ -123,6 +132,7 @@ export function PdvScreen({ operadorNome, isAdmin, loja }: PdvScreenProps) {
       if (!ok) return;
     }
     setModalPagamento(false);
+    setPesoPendente(null);
     setSucesso(null);
     setCodigoVenda(null);
     setItens([]);
@@ -150,16 +160,26 @@ export function PdvScreen({ operadorNome, isAdmin, loja }: PdvScreenProps) {
   }, [caixaOcupado, itens.length]);
 
   /**
-   * Adiciona produto ao carrinho (mesma SKU soma quantidade).
+   * Adiciona produto ao carrinho (mesma SKU soma quantidade/peso).
+   * Produtos por kg abrem o modal de peso antes de entrar no carrinho.
    *
    * @param produto - Produto do banco.
-   * @param quantidade - Quantidade a adicionar.
+   * @param quantidade - Quantidade (un) ou sugestão de peso (kg).
    */
   const adicionarProduto = useCallback(
     (produto: PdvProduct, quantidade: number) => {
       if (!caixaOcupado) {
         setFeedback("Pressione F2 para iniciar uma nova venda.");
         focarInput();
+        return;
+      }
+
+      if (produto.unidadeVenda === "KG") {
+        setSugestoes([]);
+        setPesoPendente({
+          produto,
+          pesoSugerido: quantidade > 0 ? quantidade : 0,
+        });
         return;
       }
 
@@ -195,6 +215,7 @@ export function PdvScreen({ operadorNome, isAdmin, loja }: PdvScreenProps) {
             nome: produto.nome,
             quantidade: qty,
             precoUnitario: produto.precoUnitario,
+            unidadeVenda: produto.unidadeVenda,
           },
         ];
       });
@@ -205,6 +226,66 @@ export function PdvScreen({ operadorNome, isAdmin, loja }: PdvScreenProps) {
       focarInput();
     },
     [caixaOcupado, focarInput],
+  );
+
+  /**
+   * Confirma o peso digitado no modal e inclui o item por kg no carrinho.
+   *
+   * @param pesoKg - Peso em quilogramas (> 0).
+   */
+  const confirmarPeso = useCallback(
+    (pesoKg: number) => {
+      const pendente = pesoPendente;
+      if (!pendente) return;
+      const { produto } = pendente;
+      const qty = Number(pesoKg.toFixed(3));
+
+      if (produto.quantidadeEstoque < qty) {
+        setFeedback(
+          `Estoque insuficiente: ${produto.nome} (disp. ${produto.quantidadeEstoque} kg).`,
+        );
+        setPesoPendente(null);
+        focarInput();
+        return;
+      }
+
+      setItens((prev) => {
+        const idx = prev.findIndex((i) => i.produtoId === produto.id);
+        if (idx >= 0) {
+          const novaQty = Number((prev[idx].quantidade + qty).toFixed(3));
+          if (novaQty > produto.quantidadeEstoque) {
+            setFeedback(
+              `Estoque insuficiente: ${produto.nome} (disp. ${produto.quantidadeEstoque} kg).`,
+            );
+            return prev;
+          }
+          const next = [...prev];
+          next[idx] = { ...next[idx], quantidade: novaQty };
+          return next;
+        }
+        return [
+          ...prev,
+          {
+            lineId: `${produto.id}-${Date.now()}`,
+            produtoId: produto.id,
+            codigoBarras: produto.codigoBarras,
+            nome: produto.nome,
+            quantidade: qty,
+            precoUnitario: produto.precoUnitario,
+            unidadeVenda: "KG",
+          },
+        ];
+      });
+      setPesoPendente(null);
+      setInput("");
+      setSugestoes([]);
+      setUltimoProduto(produto);
+      setFeedback(
+        `${produto.nome} · +${formatQuantidade(qty, "KG")} · ${formatCurrencyBRL(qty * produto.precoUnitario)}`,
+      );
+      focarInput();
+    },
+    [pesoPendente, focarInput],
   );
 
   /**
@@ -332,14 +413,23 @@ export function PdvScreen({ operadorNome, isAdmin, loja }: PdvScreenProps) {
   }
 
   /**
-   * Altera quantidade de uma linha (mínimo 1).
+   * Altera quantidade/peso de uma linha do carrinho.
    *
    * @param lineId - Id da linha.
-   * @param quantidade - Nova quantidade.
+   * @param quantidade - Nova quantidade (un) ou peso (kg).
+   * @param unidadeVenda - Unidade da linha para validar casas decimais.
    */
-  function alterarQuantidade(lineId: string, quantidade: number) {
-    const qty = Math.floor(quantidade);
-    if (!Number.isFinite(qty) || qty < 1) return;
+  function alterarQuantidade(
+    lineId: string,
+    quantidade: number,
+    unidadeVenda: UnidadeVenda,
+  ) {
+    if (!Number.isFinite(quantidade) || quantidade <= 0) return;
+    const qty =
+      unidadeVenda === "KG"
+        ? Number(quantidade.toFixed(3))
+        : Math.floor(quantidade);
+    if (unidadeVenda === "UNIDADE" && qty < 1) return;
     setItens((prev) =>
       prev.map((i) => (i.lineId === lineId ? { ...i, quantidade: qty } : i)),
     );
@@ -358,7 +448,8 @@ export function PdvScreen({ operadorNome, isAdmin, loja }: PdvScreenProps) {
       quantidade: i.quantidade,
       nome: i.nome,
       precoUnitario: i.precoUnitario,
-      precoTotal: i.quantidade * i.precoUnitario,
+      precoTotal: Number((i.quantidade * i.precoUnitario).toFixed(2)),
+      unidadeVenda: i.unidadeVenda,
     }));
     const totalSnapshot = totalGeral;
     const codigoSnapshot = codigoVenda;
@@ -575,6 +666,7 @@ export function PdvScreen({ operadorNome, isAdmin, loja }: PdvScreenProps) {
                       </span>
                       <span className="shrink-0 font-medium">
                         {formatCurrencyBRL(s.precoUnitario)}
+                        {s.unidadeVenda === "KG" ? "/kg" : ""}
                       </span>
                     </button>
                   </li>
@@ -614,6 +706,7 @@ export function PdvScreen({ operadorNome, isAdmin, loja }: PdvScreenProps) {
                   </p>
                   <p className="text-sm text-emerald-400">
                     {formatCurrencyBRL(ultimoProduto.precoUnitario)}
+                    {ultimoProduto.unidadeVenda === "KG" ? "/kg" : ""}
                   </p>
                 </div>
               </div>
@@ -661,22 +754,32 @@ export function PdvScreen({ operadorNome, isAdmin, loja }: PdvScreenProps) {
                         </td>
                         <td className="px-3 py-2">{item.nome}</td>
                         <td className="px-3 py-2">
-                          <input
-                            type="number"
-                            min={1}
-                            value={item.quantidade}
-                            onChange={(e) =>
-                              alterarQuantidade(
-                                item.lineId,
-                                Number(e.target.value),
-                              )
-                            }
-                            onBlur={focarInput}
-                            className="w-16 rounded border border-zinc-600 bg-zinc-900 px-2 py-1 text-center outline-none focus:ring-1 focus:ring-emerald-500"
-                          />
+                          <div className="flex items-center gap-1">
+                            <input
+                              type="number"
+                              min={item.unidadeVenda === "KG" ? 0.001 : 1}
+                              step={item.unidadeVenda === "KG" ? 0.001 : 1}
+                              value={item.quantidade}
+                              onChange={(e) =>
+                                alterarQuantidade(
+                                  item.lineId,
+                                  Number(e.target.value),
+                                  item.unidadeVenda,
+                                )
+                              }
+                              onBlur={focarInput}
+                              className="w-20 rounded border border-zinc-600 bg-zinc-900 px-2 py-1 text-center outline-none focus:ring-1 focus:ring-emerald-500"
+                            />
+                            <span className="text-xs text-zinc-500">
+                              {item.unidadeVenda === "KG" ? "kg" : "un"}
+                            </span>
+                          </div>
                         </td>
                         <td className="px-3 py-2 tabular-nums">
                           {formatCurrencyBRL(item.precoUnitario)}
+                          {item.unidadeVenda === "KG" ? (
+                            <span className="text-xs text-zinc-500">/kg</span>
+                          ) : null}
                         </td>
                         <td className="px-3 py-2 font-medium tabular-nums">
                           {formatCurrencyBRL(
@@ -710,8 +813,7 @@ export function PdvScreen({ operadorNome, isAdmin, loja }: PdvScreenProps) {
               {formatCurrencyBRL(totalGeral)}
             </p>
             <p className="mt-3 text-sm text-emerald-100">
-              {itens.length} item(ns) ·{" "}
-              {itens.reduce((a, i) => a + i.quantidade, 0)} un.
+              {itens.length} item(ns)
             </p>
           </div>
 
@@ -750,6 +852,7 @@ export function PdvScreen({ operadorNome, isAdmin, loja }: PdvScreenProps) {
               <li>
                 <kbd className="text-zinc-200">3*codigo</kbd> — Qtd × produto
               </li>
+              <li>Produtos por kg pedem o peso ao bipar</li>
               <li>
                 <kbd className="text-zinc-200">Esc</kbd> — Limpar busca
               </li>
@@ -757,6 +860,18 @@ export function PdvScreen({ operadorNome, isAdmin, loja }: PdvScreenProps) {
           </div>
         </aside>
       </div>
+
+      {pesoPendente ? (
+        <WeightModal
+          produto={pesoPendente.produto}
+          pesoInicial={pesoPendente.pesoSugerido}
+          onCancel={() => {
+            setPesoPendente(null);
+            focarInput();
+          }}
+          onConfirm={confirmarPeso}
+        />
+      ) : null}
 
       {modalPagamento ? (
         <PaymentModal

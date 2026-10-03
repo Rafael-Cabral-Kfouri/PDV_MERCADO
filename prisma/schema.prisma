@@ -27,6 +27,12 @@ enum PaymentMethod {
   PIX
 }
 
+/// Unidade de cobrança do produto no PDV.
+enum UnidadeVenda {
+  UNIDADE
+  KG
+}
+
 model User {
   id        String   @id @default(cuid())
   nome      String
@@ -42,14 +48,17 @@ model User {
 }
 
 model Product {
-  id                String     @id @default(cuid())
-  codigoBarras      String     @unique
+  id                String       @id @default(cuid())
+  codigoBarras      String       @unique
   nome              String
-  precoUnitario     Decimal    @db.Decimal(10, 2)
-  quantidadeEstoque Int        @default(0)
+  /// Preço por unidade ou por kg, conforme `unidadeVenda`.
+  precoUnitario     Decimal      @db.Decimal(10, 2)
+  /// Estoque em unidades inteiras ou em kg (até 3 casas).
+  quantidadeEstoque Decimal      @default(0) @db.Decimal(12, 3)
+  unidadeVenda      UnidadeVenda @default(UNIDADE)
   /// Caminho público opcional, ex.: /uploads/produtos/abc.jpg
   fotoUrl           String?
-  criadoEm          DateTime   @default(now())
+  criadoEm          DateTime     @default(now())
   itensVenda        SaleItem[]
 }
 
@@ -69,7 +78,8 @@ model SaleItem {
   id            String  @id @default(cuid())
   vendaId       String
   produtoId     String
-  quantidade    Int
+  /// Quantidade em unidades ou kg (até 3 casas).
+  quantidade    Decimal @db.Decimal(12, 3)
   precoUnitario Decimal @db.Decimal(10, 2)
   precoTotal    Decimal @db.Decimal(12, 2)
   venda         Sale    @relation(fields: [vendaId], references: [id], onDelete: Cascade)

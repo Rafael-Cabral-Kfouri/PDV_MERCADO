@@ -12,7 +12,8 @@ export default async function AdminProdutosPage() {
     nome: p.nome,
     codigoBarras: p.codigoBarras,
     precoUnitario: p.precoUnitario.toString(),
-    quantidadeEstoque: p.quantidadeEstoque,
+    quantidadeEstoque: Number(p.quantidadeEstoque),
+    unidadeVenda: p.unidadeVenda,
     fotoUrl: p.fotoUrl,
   }));
 
@@ -21,7 +22,8 @@ export default async function AdminProdutosPage() {
       <div>
         <h2 className="text-2xl font-semibold text-zinc-900">Produtos</h2>
         <p className="mt-1 text-sm text-zinc-600">
-          Cadastre produtos com leitor de código de barras ou código interno.
+          Cadastre por unidade ou por kg (hortifruti). Use código de barras ou
+          código interno.
         </p>
       </div>
       <ProductsPanel produtos={rows} />

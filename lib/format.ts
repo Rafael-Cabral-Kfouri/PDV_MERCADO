@@ -64,3 +64,38 @@ export function maskCpf(value: string): string {
 export function onlyDigits(value: string): string {
   return value.replace(/\D/g, "");
 }
+
+/**
+ * Interpreta peso/quantidade digitada no padrão BR (vírgula ou ponto).
+ * Aceita "1,254", "1.254", "0,5".
+ *
+ * @param value - Texto digitado pelo operador.
+ * @returns Número (pode ser NaN se inválido).
+ */
+export function parseDecimalBR(value: string): number {
+  const cleaned = value.trim().replace(/\s+/g, "").replace(",", ".");
+  if (!cleaned || cleaned === ".") return Number.NaN;
+  return Number.parseFloat(cleaned);
+}
+
+/**
+ * Formata quantidade para exibição (unidades ou kg).
+ *
+ * @param value - Quantidade numérica.
+ * @param unidade - `UNIDADE` (inteiro) ou `KG` (até 3 casas).
+ * @returns Texto formatado em pt-BR, com sufixo opcional.
+ */
+export function formatQuantidade(
+  value: number,
+  unidade: "UNIDADE" | "KG" = "UNIDADE",
+): string {
+  if (unidade === "KG") {
+    return `${new Intl.NumberFormat("pt-BR", {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 3,
+    }).format(value)} kg`;
+  }
+  return new Intl.NumberFormat("pt-BR", {
+    maximumFractionDigits: 0,
+  }).format(value);
+}

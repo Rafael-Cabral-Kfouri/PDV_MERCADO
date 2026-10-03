@@ -50,6 +50,12 @@ Para subir junto com o Windows: Agendador de Tarefas → ao logon → executar `
 
 Se o `iniciar-pdv.bat` falhar com `Cannot find module '@prisma/client-...'`, rode **`reconstruir-pdv.bat`** e depois `iniciar-pdv.bat` de novo.
 
+Após `git pull` com mudanças de banco, rode `npx prisma migrate deploy` (ou `instalar-pdv.bat` / rebuild) antes de usar.
+
+### Produtos por kg
+
+No admin → Produtos, marque **Quilo (kg)** e informe o preço por kg. No caixa, ao bipar esse produto, o PDV pede o peso (balança externa) e calcula o total automaticamente.
+
 ## Usuários iniciais (seed)
 
 | E-mail | Senha | Destino |

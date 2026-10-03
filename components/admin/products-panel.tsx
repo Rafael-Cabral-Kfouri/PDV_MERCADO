@@ -9,8 +9,9 @@ import {
   salvarProdutoAction,
   type ActionResult,
 } from "@/lib/actions/products";
-import { formatCurrencyBRL, maskCurrencyInput } from "@/lib/format";
+import { formatCurrencyBRL, formatQuantidade, maskCurrencyInput } from "@/lib/format";
 import { useToast } from "@/components/ui/toast";
+import type { UnidadeVenda } from "@prisma/client";
 
 export type ProductRow = {
   id: string;
@@ -18,6 +19,7 @@ export type ProductRow = {
   codigoBarras: string;
   precoUnitario: string;
   quantidadeEstoque: number;
+  unidadeVenda: UnidadeVenda;
   fotoUrl: string | null;
 };
 
@@ -27,6 +29,7 @@ type FormState = {
   codigoBarras: string;
   precoUnitario: string;
   quantidadeEstoque: string;
+  unidadeVenda: UnidadeVenda;
   fotoUrl: string | null;
   removerFoto: boolean;
 };
@@ -37,6 +40,7 @@ const emptyForm: FormState = {
   codigoBarras: "",
   precoUnitario: "",
   quantidadeEstoque: "0",
+  unidadeVenda: "UNIDADE",
   fotoUrl: null,
   removerFoto: false,
 };
@@ -95,7 +99,8 @@ export function ProductsPanel({ produtos }: { produtos: ProductRow[] }) {
       nome: produto.nome,
       codigoBarras: produto.codigoBarras,
       precoUnitario: formatCurrencyBRL(Number(produto.precoUnitario)),
-      quantidadeEstoque: String(produto.quantidadeEstoque),
+      quantidadeEstoque: String(produto.quantidadeEstoque).replace(".", ","),
+      unidadeVenda: produto.unidadeVenda,
       fotoUrl: produto.fotoUrl,
       removerFoto: false,
     });
@@ -232,12 +237,49 @@ export function ProductsPanel({ produtos }: { produtos: ProductRow[] }) {
             </div>
           </div>
 
+          <div className="sm:col-span-2 flex flex-col gap-1.5">
+            <span className="text-sm font-medium text-zinc-700">
+              Cobrado por
+            </span>
+            <div className="flex flex-wrap gap-4">
+              <label className="flex items-center gap-2 text-sm text-zinc-700">
+                <input
+                  type="radio"
+                  name="unidadeVenda"
+                  value="UNIDADE"
+                  checked={form.unidadeVenda === "UNIDADE"}
+                  onChange={() =>
+                    setForm((p) => ({ ...p, unidadeVenda: "UNIDADE" }))
+                  }
+                  className="accent-emerald-700"
+                />
+                Unidade
+              </label>
+              <label className="flex items-center gap-2 text-sm text-zinc-700">
+                <input
+                  type="radio"
+                  name="unidadeVenda"
+                  value="KG"
+                  checked={form.unidadeVenda === "KG"}
+                  onChange={() =>
+                    setForm((p) => ({ ...p, unidadeVenda: "KG" }))
+                  }
+                  className="accent-emerald-700"
+                />
+                Quilo (kg)
+              </label>
+            </div>
+            <p className="text-xs text-zinc-500">
+              Produtos por kg pedem o peso no caixa (balança externa).
+            </p>
+          </div>
+
           <div className="flex flex-col gap-1.5">
             <label
               htmlFor="precoUnitario"
               className="text-sm font-medium text-zinc-700"
             >
-              Preço unitário
+              {form.unidadeVenda === "KG" ? "Preço por kg" : "Preço unitário"}
             </label>
             <input
               id="precoUnitario"
@@ -261,18 +303,21 @@ export function ProductsPanel({ produtos }: { produtos: ProductRow[] }) {
               htmlFor="quantidadeEstoque"
               className="text-sm font-medium text-zinc-700"
             >
-              Quantidade em estoque
+              {form.unidadeVenda === "KG"
+                ? "Estoque (kg)"
+                : "Quantidade em estoque"}
             </label>
             <input
               id="quantidadeEstoque"
               name="quantidadeEstoque"
-              type="number"
-              min={0}
+              type="text"
+              inputMode="decimal"
               required
               value={form.quantidadeEstoque}
               onChange={(e) =>
                 setForm((p) => ({ ...p, quantidadeEstoque: e.target.value }))
               }
+              placeholder={form.unidadeVenda === "KG" ? "Ex.: 12,500" : "0"}
               className="rounded-lg border border-zinc-300 px-3 py-2 outline-none ring-emerald-600 focus:ring-2"
             />
           </div>
@@ -381,6 +426,7 @@ export function ProductsPanel({ produtos }: { produtos: ProductRow[] }) {
                 <th className="px-2 py-2 font-medium">Foto</th>
                 <th className="px-2 py-2 font-medium">Nome</th>
                 <th className="px-2 py-2 font-medium">Código</th>
+                <th className="px-2 py-2 font-medium">Cobrança</th>
                 <th className="px-2 py-2 font-medium">Preço</th>
                 <th className="px-2 py-2 font-medium">Estoque</th>
                 <th className="px-2 py-2 font-medium">Ações</th>
@@ -389,7 +435,7 @@ export function ProductsPanel({ produtos }: { produtos: ProductRow[] }) {
             <tbody>
               {filtrados.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-2 py-6 text-center text-zinc-500">
+                  <td colSpan={7} className="px-2 py-6 text-center text-zinc-500">
                     Nenhum produto encontrado.
                   </td>
                 </tr>
@@ -420,9 +466,18 @@ export function ProductsPanel({ produtos }: { produtos: ProductRow[] }) {
                       {produto.codigoBarras}
                     </td>
                     <td className="px-2 py-3">
-                      {formatCurrencyBRL(Number(produto.precoUnitario))}
+                      {produto.unidadeVenda === "KG" ? "kg" : "un"}
                     </td>
-                    <td className="px-2 py-3">{produto.quantidadeEstoque}</td>
+                    <td className="px-2 py-3">
+                      {formatCurrencyBRL(Number(produto.precoUnitario))}
+                      {produto.unidadeVenda === "KG" ? "/kg" : ""}
+                    </td>
+                    <td className="px-2 py-3">
+                      {formatQuantidade(
+                        Number(produto.quantidadeEstoque),
+                        produto.unidadeVenda,
+                      )}
+                    </td>
                     <td className="px-2 py-3">
                       <div className="flex gap-2">
                         <button
