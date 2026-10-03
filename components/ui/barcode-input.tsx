@@ -2,90 +2,108 @@
 
 import {
   forwardRef,
-  useEffect,
+  useCallback,
   useRef,
-  type ForwardedRef,
   type InputHTMLAttributes,
   type KeyboardEvent,
-  type RefObject,
 } from "react";
+import { useBarcodeWedge } from "@/hooks/use-barcode-wedge";
 
 type BarcodeInputProps = Omit<
   InputHTMLAttributes<HTMLInputElement>,
   "value" | "onChange" | "defaultValue" | "type"
 > & {
-  /** Valor controlado pelo pai (ex.: limpar após bipar). */
+  /** Valor exibido no campo. */
   value: string;
   /**
-   * Chamado quando o valor muda (digitação manual ou bipagem).
+   * Chamado quando o valor muda (digitação, colagem ou bipagem).
    *
-   * @param value - Texto atual do campo, sem espaços.
+   * @param value - Texto atual sem espaços.
    */
   onValueChange: (value: string) => void;
   /**
-   * Chamado ao confirmar (Enter do teclado ou sufixo do leitor).
-   * Usa o valor do DOM para não perder dígitos em bipagens rápidas.
+   * Chamado ao confirmar Enter (teclado ou sufixo do leitor).
    *
-   * @param value - Código lido no momento do Enter.
+   * @param value - Código confirmado.
    */
   onConfirm?: (value: string) => void;
+  /**
+   * Se true (padrão), captura bipagem mesmo sem foco no campo
+   * (listener global em modo teclado).
+   */
+  captureGlobal?: boolean;
 };
 
 /**
- * Une a ref interna do campo com a ref encaminhada pelo componente pai.
+ * Campo otimizado para leitores de código de barras (USB keyboard wedge).
  *
- * @param el - Elemento input atual (ou null ao desmontar).
- * @param internal - Ref interna usada para sincronizar o valor.
- * @param forwarded - Ref opcional do pai (callback ou objeto).
- */
-function assignRefs(
-  el: HTMLInputElement | null,
-  internal: RefObject<HTMLInputElement | null>,
-  forwarded: ForwardedRef<HTMLInputElement>,
-) {
-  internal.current = el;
-  if (typeof forwarded === "function") {
-    forwarded(el);
-  } else if (forwarded) {
-    forwarded.current = el;
-  }
-}
-
-/**
- * Campo de texto otimizado para leitores de código de barras em modo teclado.
+ * Combina input controlado com detector de bipagem rápida: durante a leitura
+ * os dígitos aparecem no campo (`onPartial`) e, ao Enter do leitor, confirma
+ * o código completo. Também aceita digitação manual e colagem.
  *
- * Leitores USB costumam enviar os dígitos em milissegundos e terminar com Enter.
- * Em inputs 100% controlados pelo React, o re-render pode apagar caracteres no meio
- * da bipagem. Este componente mantém o valor no DOM e sincroniza com o pai,
- * lendo sempre `input.value` nativo no Enter.
- *
- * @param value - Valor externo (quando o pai limpa ou preenche o campo).
- * @param onValueChange - Callback de alteração do texto.
- * @param onConfirm - Callback opcional ao pressionar Enter.
- * @param props - Demais atributos nativos de `input` (id, className, etc.).
- * @returns Elemento `input` pronto para bipagem e digitação manual.
+ * @param value - Valor atual do campo.
+ * @param onValueChange - Atualiza o state do pai.
+ * @param onConfirm - Opcional; Enter ou fim de bipagem.
+ * @param captureGlobal - Ativa captura global (padrão: true).
+ * @param props - Demais props nativas do input.
+ * @returns Input pronto para bipagem e digitação manual.
  */
 export const BarcodeInput = forwardRef<HTMLInputElement, BarcodeInputProps>(
   function BarcodeInput(
-    { value, onValueChange, onConfirm, onKeyDown, ...props },
+    {
+      value,
+      onValueChange,
+      onConfirm,
+      onKeyDown,
+      captureGlobal = true,
+      disabled,
+      ...props
+    },
     forwardedRef,
   ) {
-    const internalRef = useRef<HTMLInputElement>(null);
-    const lastExternalValue = useRef(value);
-
-    useEffect(() => {
-      const el = internalRef.current;
-      if (!el) return;
-      if (value !== lastExternalValue.current || value !== el.value) {
-        el.value = value;
-        lastExternalValue.current = value;
-      }
-    }, [value]);
+    const localRef = useRef<HTMLInputElement | null>(null);
 
     /**
-     * Normaliza o texto removendo espaços (leitores às vezes enviam espaços).
+     * Mantém o ref local e o ref encaminhado pelo pai apontando para o input.
      *
-     * @param raw - Valor bruto do input.
+     * @param node - Elemento do input ou `null` no unmount.
+     */
+    function setRefs(node: HTMLInputElement | null) {
+      localRef.current = node;
+      if (typeof forwardedRef === "function") {
+        forwardedRef(node);
+      } else if (forwardedRef) {
+        forwardedRef.current = node;
+      }
+    }
+
+    const handleScan = useCallback(
+      (code: string) => {
+        onValueChange(code);
+        onConfirm?.(code);
+      },
+      [onValueChange, onConfirm],
+    );
+
+    const handlePartial = useCallback(
+      (partial: string) => {
+        onValueChange(partial);
+      },
+      [onValueChange],
+    );
+
+    useBarcodeWedge({
+      enabled: captureGlobal && !disabled,
+      minLength: 4,
+      inputRef: localRef,
+      onPartial: handlePartial,
+      onScan: handleScan,
+    });
+
+    /**
+     * Normaliza removendo espaços.
+     *
+     * @param raw - Texto bruto.
      * @returns Texto sem espaços.
      */
     function normalizar(raw: string): string {
@@ -93,18 +111,15 @@ export const BarcodeInput = forwardRef<HTMLInputElement, BarcodeInputProps>(
     }
 
     /**
-     * Trata Enter do leitor/teclado e encaminha demais teclas ao handler externo.
+     * Enter confirma o valor atual do campo (digitação manual).
+     * Em bipagem rápida o wedge já trata o Enter na fase capture.
      *
-     * @param e - Evento de teclado do input.
+     * @param e - Evento de teclado.
      */
     function handleKeyDown(e: KeyboardEvent<HTMLInputElement>) {
       if (e.key === "Enter") {
         e.preventDefault();
-        const atual = normalizar(e.currentTarget.value);
-        if (e.currentTarget.value !== atual) {
-          e.currentTarget.value = atual;
-        }
-        lastExternalValue.current = atual;
+        const atual = normalizar(e.currentTarget.value || value);
         onValueChange(atual);
         onConfirm?.(atual);
         return;
@@ -115,20 +130,22 @@ export const BarcodeInput = forwardRef<HTMLInputElement, BarcodeInputProps>(
     return (
       <input
         {...props}
-        ref={(el) => assignRefs(el, internalRef, forwardedRef)}
+        ref={setRefs}
         type="text"
+        disabled={disabled}
         autoComplete="off"
         spellCheck={false}
-        defaultValue={value}
-        onChange={(e) => {
-          const atual = normalizar(e.target.value);
-          if (e.target.value !== atual) {
-            e.target.value = atual;
-          }
-          lastExternalValue.current = atual;
-          onValueChange(atual);
-        }}
+        value={value}
+        onChange={(e) => onValueChange(normalizar(e.target.value))}
         onKeyDown={handleKeyDown}
+        onPaste={(e) => {
+          const text = normalizar(e.clipboardData.getData("text"));
+          if (text.length >= 4) {
+            e.preventDefault();
+            onValueChange(text);
+            onConfirm?.(text);
+          }
+        }}
       />
     );
   },

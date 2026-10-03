@@ -614,6 +614,7 @@ export function PdvScreen({ operadorNome, isAdmin, loja }: PdvScreenProps) {
               ref={inputRef}
               id="pdv-input"
               value={input}
+              captureGlobal={!modalAberto}
               onValueChange={(valor) => {
                 setInput(valor);
                 setFeedback(null);

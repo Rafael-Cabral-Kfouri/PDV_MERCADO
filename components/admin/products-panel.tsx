@@ -181,20 +181,6 @@ export function ProductsPanel({ produtos }: { produtos: ProductRow[] }) {
           <input type="hidden" name="id" value={form.id} />
 
           <div className="sm:col-span-2 flex flex-col gap-1.5">
-            <label htmlFor="nome" className="text-sm font-medium text-zinc-700">
-              Nome do produto
-            </label>
-            <input
-              id="nome"
-              name="nome"
-              required
-              value={form.nome}
-              onChange={(e) => setForm((p) => ({ ...p, nome: e.target.value }))}
-              className="rounded-lg border border-zinc-300 px-3 py-2 outline-none ring-emerald-600 focus:ring-2"
-            />
-          </div>
-
-          <div className="sm:col-span-2 flex flex-col gap-1.5">
             <label
               htmlFor="codigoBarras"
               className="text-sm font-medium text-zinc-700"
@@ -212,12 +198,15 @@ export function ProductsPanel({ produtos }: { produtos: ProductRow[] }) {
                 onValueChange={(codigoBarras) =>
                   setForm((p) => ({ ...p, codigoBarras }))
                 }
-                onConfirm={() => {
-                  (
-                    codigoRef.current?.form?.elements.namedItem(
-                      "nome",
-                    ) as HTMLInputElement | null
-                  )?.focus();
+                onConfirm={(codigo) => {
+                  setForm((p) => ({ ...p, codigoBarras: codigo }));
+                  window.requestAnimationFrame(() => {
+                    (
+                      document.getElementById(
+                        "nome",
+                      ) as HTMLInputElement | null
+                    )?.focus();
+                  });
                 }}
                 placeholder="Bipe ou digite o código"
                 className="flex-1 rounded-lg border border-zinc-300 px-3 py-2 font-mono outline-none ring-emerald-600 focus:ring-2"
@@ -231,6 +220,23 @@ export function ProductsPanel({ produtos }: { produtos: ProductRow[] }) {
                 Gerar código interno
               </button>
             </div>
+            <p className="text-xs text-zinc-500">
+              Pode bipar mesmo sem clicar no campo. O código preenche sozinho.
+            </p>
+          </div>
+
+          <div className="sm:col-span-2 flex flex-col gap-1.5">
+            <label htmlFor="nome" className="text-sm font-medium text-zinc-700">
+              Nome do produto
+            </label>
+            <input
+              id="nome"
+              name="nome"
+              required
+              value={form.nome}
+              onChange={(e) => setForm((p) => ({ ...p, nome: e.target.value }))}
+              className="rounded-lg border border-zinc-300 px-3 py-2 outline-none ring-emerald-600 focus:ring-2"
+            />
           </div>
 
           <div className="sm:col-span-2 flex flex-col gap-1.5">
