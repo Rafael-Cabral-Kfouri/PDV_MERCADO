@@ -9,6 +9,7 @@ import {
   type ActionResult,
 } from "@/lib/actions/products";
 import { formatCurrencyBRL, formatQuantidade, maskCurrencyInput } from "@/lib/format";
+import { BarcodeInput } from "@/components/ui/barcode-input";
 import { useToast } from "@/components/ui/toast";
 import type { UnidadeVenda } from "@prisma/client";
 
@@ -198,29 +199,22 @@ export function ProductsPanel({ produtos }: { produtos: ProductRow[] }) {
               Código de barras
             </label>
             <div className="flex flex-col gap-2 sm:flex-row">
-              <input
+              <BarcodeInput
                 ref={codigoRef}
                 id="codigoBarras"
                 name="codigoBarras"
                 required
-                autoComplete="off"
                 inputMode="numeric"
                 value={form.codigoBarras}
-                onChange={(e) =>
-                  setForm((p) => ({
-                    ...p,
-                    codigoBarras: e.target.value.replace(/\s+/g, ""),
-                  }))
+                onValueChange={(codigoBarras) =>
+                  setForm((p) => ({ ...p, codigoBarras }))
                 }
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    (
-                      e.currentTarget.form?.elements.namedItem(
-                        "nome",
-                      ) as HTMLInputElement | null
-                    )?.focus();
-                  }
+                onConfirm={() => {
+                  (
+                    codigoRef.current?.form?.elements.namedItem(
+                      "nome",
+                    ) as HTMLInputElement | null
+                  )?.focus();
                 }}
                 placeholder="Bipe ou digite o código"
                 className="flex-1 rounded-lg border border-zinc-300 px-3 py-2 font-mono outline-none ring-emerald-600 focus:ring-2"

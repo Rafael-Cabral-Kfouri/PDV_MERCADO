@@ -21,6 +21,7 @@ import {
   SaleSuccessModal,
   type SaleSuccessInfo,
 } from "@/components/pdv/sale-success-modal";
+import { BarcodeInput } from "@/components/ui/barcode-input";
 import type { StoreSettingsDTO } from "@/lib/actions/settings";
 import type { UnidadeVenda } from "@prisma/client";
 
@@ -92,11 +93,17 @@ export function PdvScreen({ operadorNome, isAdmin, loja }: PdvScreenProps) {
 
   /**
    * Foca o input principal (uso contínuo de bipagem).
+   * Só seleciona o texto quando o campo já tem conteúdo — evita apagar
+   * dígitos no meio de uma bipagem rápida do leitor.
    */
   const focarInput = useCallback(() => {
     window.requestAnimationFrame(() => {
-      inputRef.current?.focus();
-      inputRef.current?.select();
+      const el = inputRef.current;
+      if (!el) return;
+      el.focus();
+      if (el.value.length > 0) {
+        el.select();
+      }
     });
   }, []);
 
@@ -290,64 +297,72 @@ export function PdvScreen({ operadorNome, isAdmin, loja }: PdvScreenProps) {
 
   /**
    * Resolve Enter no input: código adiciona; nome usa sugestões.
+   * Preferir o valor do DOM (passado pelo BarcodeInput) para não perder
+   * dígitos quando o leitor envia Enter antes do React atualizar o state.
+   *
+   * @param valorLido - Texto atual do campo no momento do Enter (opcional).
    */
-  const confirmarInput = useCallback(async () => {
-    const raw = input.trim();
-    if (!raw || modalAberto) return;
+  const confirmarInput = useCallback(
+    async (valorLido?: string) => {
+      const raw = (valorLido ?? input).trim();
+      if (!raw || modalAberto) return;
 
-    if (!caixaOcupado) {
-      setFeedback("Pressione F2 para iniciar uma nova venda.");
-      return;
-    }
+      if (!caixaOcupado) {
+        setFeedback("Pressione F2 para iniciar uma nova venda.");
+        return;
+      }
 
-    const { quantidade, termo } = parseQtyPrefix(raw);
+      setInput(raw);
+      const { quantidade, termo } = parseQtyPrefix(raw);
 
-    if (sugestoes.length > 0 && !pareceCodigoBarras(termo)) {
-      const escolhido = sugestoes[sugestaoIndex] ?? sugestoes[0];
-      adicionarProduto(escolhido, quantidade);
-      return;
-    }
+      if (sugestoes.length > 0 && !pareceCodigoBarras(termo)) {
+        const escolhido = sugestoes[sugestaoIndex] ?? sugestoes[0];
+        adicionarProduto(escolhido, quantidade);
+        return;
+      }
 
-    setBuscando(true);
-    setFeedback(null);
-    try {
-      if (pareceCodigoBarras(termo)) {
-        const produto = await buscarProdutoPorCodigo(termo);
-        if (!produto) {
-          setFeedback(`Produto não encontrado: ${termo}`);
-          setInput("");
-          focarInput();
+      setBuscando(true);
+      setFeedback(null);
+      try {
+        if (pareceCodigoBarras(termo)) {
+          const produto = await buscarProdutoPorCodigo(termo);
+          if (!produto) {
+            setFeedback(`Produto não encontrado: ${termo}`);
+            setInput("");
+            focarInput();
+            return;
+          }
+          adicionarProduto(produto, quantidade);
           return;
         }
-        adicionarProduto(produto, quantidade);
-        return;
-      }
 
-      const lista = await buscarProdutosSugestao(termo);
-      if (lista.length === 0) {
-        setFeedback("Nenhum produto encontrado. Refine a busca.");
-        setSugestoes([]);
-        return;
+        const lista = await buscarProdutosSugestao(termo);
+        if (lista.length === 0) {
+          setFeedback("Nenhum produto encontrado. Refine a busca.");
+          setSugestoes([]);
+          return;
+        }
+        if (lista.length === 1) {
+          adicionarProduto(lista[0], quantidade);
+          return;
+        }
+        setSugestoes(lista);
+        setSugestaoIndex(0);
+        setFeedback("Selecione um produto na lista (↑↓ + Enter) ou clique.");
+      } finally {
+        setBuscando(false);
       }
-      if (lista.length === 1) {
-        adicionarProduto(lista[0], quantidade);
-        return;
-      }
-      setSugestoes(lista);
-      setSugestaoIndex(0);
-      setFeedback("Selecione um produto na lista (↑↓ + Enter) ou clique.");
-    } finally {
-      setBuscando(false);
-    }
-  }, [
-    input,
-    modalAberto,
-    caixaOcupado,
-    sugestoes,
-    sugestaoIndex,
-    adicionarProduto,
-    focarInput,
-  ]);
+    },
+    [
+      input,
+      modalAberto,
+      caixaOcupado,
+      sugestoes,
+      sugestaoIndex,
+      adicionarProduto,
+      focarInput,
+    ],
+  );
 
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -595,13 +610,16 @@ export function PdvScreen({ operadorNome, isAdmin, loja }: PdvScreenProps) {
             >
               Bipar código · digitar nome · atalho 3*codigo
             </label>
-            <input
+            <BarcodeInput
               ref={inputRef}
               id="pdv-input"
               value={input}
-              onChange={(e) => {
-                setInput(e.target.value);
+              onValueChange={(valor) => {
+                setInput(valor);
                 setFeedback(null);
+              }}
+              onConfirm={(valor) => {
+                void confirmarInput(valor);
               }}
               onKeyDown={(e) => {
                 if (e.key === "ArrowDown" && sugestoes.length > 0) {
@@ -616,10 +634,6 @@ export function PdvScreen({ operadorNome, isAdmin, loja }: PdvScreenProps) {
                   );
                   return;
                 }
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  void confirmarInput();
-                }
               }}
               placeholder={
                 caixaOcupado
@@ -627,7 +641,6 @@ export function PdvScreen({ operadorNome, isAdmin, loja }: PdvScreenProps) {
                   : "Pressione F2 para iniciar a venda"
               }
               className="mt-2 w-full rounded-lg border border-zinc-600 bg-zinc-900 px-4 py-3 font-mono text-xl text-white outline-none ring-emerald-500 focus:ring-2"
-              autoComplete="off"
             />
 
             {sugestoes.length > 0 ? (
