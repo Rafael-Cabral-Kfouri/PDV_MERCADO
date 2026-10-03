@@ -1,6 +1,5 @@
 "use client";
 
-import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import {
@@ -447,13 +446,13 @@ export function ProductsPanel({ produtos }: { produtos: ProductRow[] }) {
                   >
                     <td className="px-2 py-3">
                       {produto.fotoUrl ? (
-                        <Image
+                        // eslint-disable-next-line @next/next/no-img-element -- uploads dinâmicos em /public
+                        <img
                           src={produto.fotoUrl}
                           alt={produto.nome}
                           width={40}
                           height={40}
                           className="h-10 w-10 rounded object-cover"
-                          unoptimized
                         />
                       ) : (
                         <span className="flex h-10 w-10 items-center justify-center rounded bg-zinc-100 text-[10px] text-zinc-400">
