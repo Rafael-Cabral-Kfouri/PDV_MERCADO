@@ -1,5 +1,6 @@
 import { ProductsPanel } from "@/components/admin/products-panel";
 import { listarProdutos } from "@/lib/actions/products";
+import { formatDateInputValue } from "@/lib/validade-produto";
 
 /**
  * Página administrativa de cadastro e listagem de produtos.
@@ -15,6 +16,7 @@ export default async function AdminProdutosPage() {
     quantidadeEstoque: Number(p.quantidadeEstoque),
     unidadeVenda: p.unidadeVenda,
     fotoUrl: p.fotoUrl,
+    dataValidade: formatDateInputValue(p.dataValidade) || null,
   }));
 
   return (

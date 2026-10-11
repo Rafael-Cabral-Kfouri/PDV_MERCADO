@@ -58,6 +58,8 @@ model Product {
   unidadeVenda      UnidadeVenda @default(UNIDADE)
   /// Caminho público opcional, ex.: /uploads/produtos/abc.jpg
   fotoUrl           String?
+  /// Data de validade do produto/lote (opcional).
+  dataValidade      DateTime?
   criadoEm          DateTime     @default(now())
   itensVenda        SaleItem[]
 }

@@ -64,7 +64,7 @@ function parseUnidadeVenda(raw: string): UnidadeVenda | null {
  * Cria ou atualiza um produto. A foto (`foto`) é opcional (JPG/PNG/WebP, máx. 2 MB).
  *
  * @param _prev - Estado anterior (compatível com useActionState, não usado).
- * @param formData - Campos: id?, nome, codigoBarras, precoUnitario, quantidadeEstoque, unidadeVenda, foto?, removerFoto?.
+ * @param formData - Campos: id?, nome, codigoBarras, precoUnitario, quantidadeEstoque, unidadeVenda, dataValidade?, foto?, removerFoto?.
  * @returns Resultado com sucesso/erro para exibir toast.
  */
 export async function salvarProdutoAction(
@@ -81,6 +81,7 @@ export async function salvarProdutoAction(
       .replace(/\s+/g, "");
     const precoRaw = String(formData.get("precoUnitario") ?? "");
     const estoqueRaw = String(formData.get("quantidadeEstoque") ?? "");
+    const validadeRaw = String(formData.get("dataValidade") ?? "").trim();
     const unidadeVenda = parseUnidadeVenda(
       String(formData.get("unidadeVenda") ?? "UNIDADE"),
     );
@@ -100,6 +101,16 @@ export async function salvarProdutoAction(
     }
     if (!unidadeVenda) {
       return { ok: false, message: "Unidade de venda inválida." };
+    }
+
+    let dataValidade: Date | null = null;
+    if (validadeRaw) {
+      // Meio-dia local evita deslocamento de fuso que muda o dia.
+      const parsed = new Date(`${validadeRaw}T12:00:00`);
+      if (Number.isNaN(parsed.getTime())) {
+        return { ok: false, message: "Data de validade inválida." };
+      }
+      dataValidade = parsed;
     }
 
     const preco = parseCurrencyBRL(precoRaw);
@@ -137,6 +148,7 @@ export async function salvarProdutoAction(
       precoUnitario: Prisma.Decimal;
       quantidadeEstoque: Prisma.Decimal;
       unidadeVenda: UnidadeVenda;
+      dataValidade: Date | null;
       fotoUrl?: string | null;
     } = {
       nome,
@@ -144,6 +156,7 @@ export async function salvarProdutoAction(
       precoUnitario: new Prisma.Decimal(preco.toFixed(2)),
       quantidadeEstoque: new Prisma.Decimal(quantidadeEstoque.toFixed(3)),
       unidadeVenda,
+      dataValidade,
     };
 
     if (id) {

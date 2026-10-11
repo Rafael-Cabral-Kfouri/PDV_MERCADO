@@ -9,6 +9,13 @@ import {
   type ActionResult,
 } from "@/lib/actions/products";
 import { formatCurrencyBRL, formatQuantidade, maskCurrencyInput } from "@/lib/format";
+import {
+  formatDateInputValue,
+  formatValidadePtBR,
+  isAlertaProdutoVencido,
+  mensagemAlertaValidade,
+  parseDateInputValue,
+} from "@/lib/validade-produto";
 import { NfeImportPanel } from "@/components/admin/nfe-import-panel";
 import { BarcodeInput } from "@/components/ui/barcode-input";
 import { useToast } from "@/components/ui/toast";
@@ -22,6 +29,7 @@ export type ProductRow = {
   quantidadeEstoque: number;
   unidadeVenda: UnidadeVenda;
   fotoUrl: string | null;
+  dataValidade: string | null;
 };
 
 type FormState = {
@@ -31,6 +39,7 @@ type FormState = {
   precoUnitario: string;
   quantidadeEstoque: string;
   unidadeVenda: UnidadeVenda;
+  dataValidade: string;
   fotoUrl: string | null;
   removerFoto: boolean;
 };
@@ -42,12 +51,14 @@ const emptyForm: FormState = {
   precoUnitario: "",
   quantidadeEstoque: "0",
   unidadeVenda: "UNIDADE",
+  dataValidade: "",
   fotoUrl: null,
   removerFoto: false,
 };
 
 /**
- * Painel de cadastro, busca, edição e exclusão de produtos (foto opcional).
+ * Painel de cadastro, busca, edição e exclusão de produtos
+ * (foto opcional e data de validade com alertas de vencimento).
  *
  * @param produtos - Lista inicial de produtos vindos do servidor.
  */
@@ -102,6 +113,7 @@ export function ProductsPanel({ produtos }: { produtos: ProductRow[] }) {
       precoUnitario: formatCurrencyBRL(Number(produto.precoUnitario)),
       quantidadeEstoque: String(produto.quantidadeEstoque).replace(".", ","),
       unidadeVenda: produto.unidadeVenda,
+      dataValidade: formatDateInputValue(produto.dataValidade),
       fotoUrl: produto.fotoUrl,
       removerFoto: false,
     });
@@ -324,6 +336,28 @@ export function ProductsPanel({ produtos }: { produtos: ProductRow[] }) {
             />
           </div>
 
+          <div className="flex flex-col gap-1.5">
+            <label
+              htmlFor="dataValidade"
+              className="text-sm font-medium text-zinc-700"
+            >
+              Data de validade
+            </label>
+            <input
+              id="dataValidade"
+              name="dataValidade"
+              type="date"
+              value={form.dataValidade}
+              onChange={(e) =>
+                setForm((p) => ({ ...p, dataValidade: e.target.value }))
+              }
+              className="rounded-lg border border-zinc-300 px-3 py-2 outline-none ring-emerald-600 focus:ring-2"
+            />
+            <p className="text-xs text-zinc-500">
+              Opcional. Alertas aparecem a partir de 6 meses do vencimento.
+            </p>
+          </div>
+
           <div className="sm:col-span-2 flex flex-col gap-3 sm:flex-row sm:items-start">
             <div className="flex flex-1 flex-col gap-1.5">
               <label htmlFor="foto" className="text-sm font-medium text-zinc-700">
@@ -431,78 +465,106 @@ export function ProductsPanel({ produtos }: { produtos: ProductRow[] }) {
                 <th className="px-2 py-2 font-medium">Cobrança</th>
                 <th className="px-2 py-2 font-medium">Preço</th>
                 <th className="px-2 py-2 font-medium">Estoque</th>
+                <th className="px-2 py-2 font-medium">Validade</th>
                 <th className="px-2 py-2 font-medium">Ações</th>
               </tr>
             </thead>
             <tbody>
               {filtrados.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-2 py-6 text-center text-zinc-500">
+                  <td colSpan={8} className="px-2 py-6 text-center text-zinc-500">
                     Nenhum produto encontrado.
                   </td>
                 </tr>
               ) : (
-                filtrados.map((produto) => (
-                  <tr
-                    key={produto.id}
-                    className="border-b border-zinc-100 text-zinc-800"
-                  >
-                    <td className="px-2 py-3">
-                      {produto.fotoUrl ? (
-                        // eslint-disable-next-line @next/next/no-img-element -- uploads dinâmicos em /public
-                        <img
-                          src={produto.fotoUrl}
-                          alt={produto.nome}
-                          width={40}
-                          height={40}
-                          className="h-10 w-10 rounded object-cover"
-                        />
-                      ) : (
-                        <span className="flex h-10 w-10 items-center justify-center rounded bg-zinc-100 text-[10px] text-zinc-400">
-                          —
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-2 py-3">{produto.nome}</td>
-                    <td className="px-2 py-3 font-mono text-xs">
-                      {produto.codigoBarras}
-                    </td>
-                    <td className="px-2 py-3">
-                      {produto.unidadeVenda === "KG" ? "kg" : "un"}
-                    </td>
-                    <td className="px-2 py-3">
-                      {formatCurrencyBRL(Number(produto.precoUnitario))}
-                      {produto.unidadeVenda === "KG" ? "/kg" : ""}
-                    </td>
-                    <td className="px-2 py-3">
-                      {formatQuantidade(
-                        Number(produto.quantidadeEstoque),
-                        produto.unidadeVenda,
-                      )}
-                    </td>
-                    <td className="px-2 py-3">
-                      <div className="flex gap-2">
-                        <button
-                          type="button"
-                          onClick={() => editarProduto(produto)}
-                          className="text-emerald-700 hover:underline"
-                        >
-                          Editar
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() =>
-                            excluirProduto(produto.id, produto.nome)
-                          }
-                          className="text-red-600 hover:underline"
-                          disabled={pending}
-                        >
-                          Excluir
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))
+                filtrados.map((produto) => {
+                  const alerta = mensagemAlertaValidade(
+                    parseDateInputValue(produto.dataValidade),
+                  );
+                  const vencido = isAlertaProdutoVencido(alerta);
+
+                  return (
+                    <tr
+                      key={produto.id}
+                      className="border-b border-zinc-100 text-zinc-800"
+                    >
+                      <td className="px-2 py-3">
+                        {produto.fotoUrl ? (
+                          // eslint-disable-next-line @next/next/no-img-element -- uploads dinâmicos em /public
+                          <img
+                            src={produto.fotoUrl}
+                            alt={produto.nome}
+                            width={40}
+                            height={40}
+                            className="h-10 w-10 rounded object-cover"
+                          />
+                        ) : (
+                          <span className="flex h-10 w-10 items-center justify-center rounded bg-zinc-100 text-[10px] text-zinc-400">
+                            —
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-2 py-3">{produto.nome}</td>
+                      <td className="px-2 py-3 font-mono text-xs">
+                        {produto.codigoBarras}
+                      </td>
+                      <td className="px-2 py-3">
+                        {produto.unidadeVenda === "KG" ? "kg" : "un"}
+                      </td>
+                      <td className="px-2 py-3">
+                        {formatCurrencyBRL(Number(produto.precoUnitario))}
+                        {produto.unidadeVenda === "KG" ? "/kg" : ""}
+                      </td>
+                      <td className="px-2 py-3">
+                        {formatQuantidade(
+                          Number(produto.quantidadeEstoque),
+                          produto.unidadeVenda,
+                        )}
+                      </td>
+                      <td className="px-2 py-3">
+                        {produto.dataValidade ? (
+                          <div className="flex flex-col gap-0.5">
+                            <span>{formatValidadePtBR(produto.dataValidade)}</span>
+                            {alerta ? (
+                              <span
+                                className={
+                                  vencido
+                                    ? "text-xs font-semibold text-red-700"
+                                    : "text-xs font-medium text-amber-700"
+                                }
+                              >
+                                {alerta}
+                              </span>
+                            ) : null}
+                          </div>
+                        ) : (
+                          <span className="text-zinc-400">—</span>
+                        )}
+                      </td>
+                      <td className="px-2 py-3">
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => editarProduto(produto)}
+                            className="text-emerald-700 hover:underline"
+                          >
+                            Editar
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              excluirProduto(produto.id, produto.nome)
+                            }
+                            className="text-red-600 hover:underline"
+                            disabled={pending}
+                          >
+                            Excluir
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>
