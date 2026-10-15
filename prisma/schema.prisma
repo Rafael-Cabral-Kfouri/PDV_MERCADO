@@ -60,6 +60,12 @@ model Product {
   fotoUrl           String?
   /// Data de validade do produto/lote (opcional).
   dataValidade      DateTime?
+  /// Se true, aplica preço promocional ao atingir a quantidade mínima.
+  promocaoAtiva            Boolean  @default(false)
+  /// Quantidade mínima (unidades) para ativar a promoção.
+  quantidadeMinimaPromocao Int?
+  /// Preço unitário promocional (menor que `precoUnitario`).
+  precoPromocional         Decimal? @db.Decimal(10, 2)
   criadoEm          DateTime     @default(now())
   itensVenda        SaleItem[]
 }

@@ -30,6 +30,9 @@ export type ProductRow = {
   unidadeVenda: UnidadeVenda;
   fotoUrl: string | null;
   dataValidade: string | null;
+  promocaoAtiva: boolean;
+  quantidadeMinimaPromocao: number | null;
+  precoPromocional: string | null;
 };
 
 type FormState = {
@@ -42,6 +45,9 @@ type FormState = {
   dataValidade: string;
   fotoUrl: string | null;
   removerFoto: boolean;
+  promocaoAtiva: boolean;
+  quantidadeMinimaPromocao: string;
+  precoPromocional: string;
 };
 
 const emptyForm: FormState = {
@@ -54,6 +60,9 @@ const emptyForm: FormState = {
   dataValidade: "",
   fotoUrl: null,
   removerFoto: false,
+  promocaoAtiva: false,
+  quantidadeMinimaPromocao: "",
+  precoPromocional: "",
 };
 
 /**
@@ -116,6 +125,15 @@ export function ProductsPanel({ produtos }: { produtos: ProductRow[] }) {
       dataValidade: formatDateInputValue(produto.dataValidade),
       fotoUrl: produto.fotoUrl,
       removerFoto: false,
+      promocaoAtiva: produto.promocaoAtiva,
+      quantidadeMinimaPromocao:
+        produto.quantidadeMinimaPromocao != null
+          ? String(produto.quantidadeMinimaPromocao)
+          : "",
+      precoPromocional:
+        produto.precoPromocional != null
+          ? formatCurrencyBRL(Number(produto.precoPromocional))
+          : "",
     });
     setPreviewLocal(null);
     if (fotoRef.current) fotoRef.current.value = "";
@@ -276,7 +294,11 @@ export function ProductsPanel({ produtos }: { produtos: ProductRow[] }) {
                   value="KG"
                   checked={form.unidadeVenda === "KG"}
                   onChange={() =>
-                    setForm((p) => ({ ...p, unidadeVenda: "KG" }))
+                    setForm((p) => ({
+                      ...p,
+                      unidadeVenda: "KG",
+                      promocaoAtiva: false,
+                    }))
                   }
                   className="accent-emerald-700"
                 />
@@ -356,6 +378,79 @@ export function ProductsPanel({ produtos }: { produtos: ProductRow[] }) {
             <p className="text-xs text-zinc-500">
               Opcional. Alertas aparecem a partir de 6 meses do vencimento.
             </p>
+          </div>
+
+          <div className="sm:col-span-2 rounded-lg border border-zinc-200 bg-zinc-50 p-4">
+            <label className="flex items-center gap-2 text-sm font-medium text-zinc-800">
+              <input
+                type="checkbox"
+                name="promocaoAtiva"
+                checked={form.promocaoAtiva}
+                disabled={form.unidadeVenda === "KG"}
+                onChange={(e) =>
+                  setForm((p) => ({ ...p, promocaoAtiva: e.target.checked }))
+                }
+                className="accent-emerald-700"
+              />
+              Promoção por quantidade
+            </label>
+            <p className="mt-1 text-xs text-zinc-500">
+              {form.unidadeVenda === "KG"
+                ? "Disponível apenas para produtos cobrados por unidade."
+                : "Ao atingir a quantidade mínima no caixa, o preço unitário passa a ser o promocional."}
+            </p>
+            {form.promocaoAtiva && form.unidadeVenda === "UNIDADE" ? (
+              <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                <div className="flex flex-col gap-1.5">
+                  <label
+                    htmlFor="quantidadeMinimaPromocao"
+                    className="text-sm font-medium text-zinc-700"
+                  >
+                    Quantidade mínima
+                  </label>
+                  <input
+                    id="quantidadeMinimaPromocao"
+                    name="quantidadeMinimaPromocao"
+                    type="number"
+                    min={2}
+                    step={1}
+                    required
+                    value={form.quantidadeMinimaPromocao}
+                    onChange={(e) =>
+                      setForm((p) => ({
+                        ...p,
+                        quantidadeMinimaPromocao: e.target.value,
+                      }))
+                    }
+                    placeholder="Ex.: 3"
+                    className="rounded-lg border border-zinc-300 bg-white px-3 py-2 outline-none ring-emerald-600 focus:ring-2"
+                  />
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <label
+                    htmlFor="precoPromocional"
+                    className="text-sm font-medium text-zinc-700"
+                  >
+                    Preço promocional
+                  </label>
+                  <input
+                    id="precoPromocional"
+                    name="precoPromocional"
+                    required
+                    inputMode="numeric"
+                    value={form.precoPromocional}
+                    onChange={(e) =>
+                      setForm((p) => ({
+                        ...p,
+                        precoPromocional: maskCurrencyInput(e.target.value),
+                      }))
+                    }
+                    placeholder="R$ 0,00"
+                    className="rounded-lg border border-zinc-300 bg-white px-3 py-2 outline-none ring-emerald-600 focus:ring-2"
+                  />
+                </div>
+              </div>
+            ) : null}
           </div>
 
           <div className="sm:col-span-2 flex flex-col gap-3 sm:flex-row sm:items-start">
@@ -464,6 +559,7 @@ export function ProductsPanel({ produtos }: { produtos: ProductRow[] }) {
                 <th className="px-2 py-2 font-medium">Código</th>
                 <th className="px-2 py-2 font-medium">Cobrança</th>
                 <th className="px-2 py-2 font-medium">Preço</th>
+                <th className="px-2 py-2 font-medium">Promoção</th>
                 <th className="px-2 py-2 font-medium">Estoque</th>
                 <th className="px-2 py-2 font-medium">Validade</th>
                 <th className="px-2 py-2 font-medium">Ações</th>
@@ -472,7 +568,7 @@ export function ProductsPanel({ produtos }: { produtos: ProductRow[] }) {
             <tbody>
               {filtrados.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="px-2 py-6 text-center text-zinc-500">
+                  <td colSpan={9} className="px-2 py-6 text-center text-zinc-500">
                     Nenhum produto encontrado.
                   </td>
                 </tr>
@@ -514,6 +610,20 @@ export function ProductsPanel({ produtos }: { produtos: ProductRow[] }) {
                       <td className="px-2 py-3">
                         {formatCurrencyBRL(Number(produto.precoUnitario))}
                         {produto.unidadeVenda === "KG" ? "/kg" : ""}
+                      </td>
+                      <td className="px-2 py-3">
+                        {produto.promocaoAtiva &&
+                        produto.quantidadeMinimaPromocao != null &&
+                        produto.precoPromocional != null ? (
+                          <span className="text-xs text-emerald-800">
+                            ≥{produto.quantidadeMinimaPromocao} un →{" "}
+                            {formatCurrencyBRL(
+                              Number(produto.precoPromocional),
+                            )}
+                          </span>
+                        ) : (
+                          <span className="text-zinc-400">—</span>
+                        )}
                       </td>
                       <td className="px-2 py-3">
                         {formatQuantidade(

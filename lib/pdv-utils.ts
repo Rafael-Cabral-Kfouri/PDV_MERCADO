@@ -1,4 +1,72 @@
 /**
+ * Dados de promoção por quantidade usados no cálculo do preço efetivo.
+ */
+export type PromocaoQuantidade = {
+  /** Se a promoção está habilitada no cadastro. */
+  promocaoAtiva: boolean;
+  /** Quantidade mínima de unidades para aplicar o preço promocional. */
+  quantidadeMinimaPromocao: number | null;
+  /** Preço unitário promocional (ou null se não configurado). */
+  precoPromocional: number | null;
+};
+
+/**
+ * Calcula o preço unitário efetivo considerando promoção por quantidade.
+ * Quando a promoção está ativa e a quantidade no carrinho atinge o mínimo,
+ * todas as unidades da linha usam o preço promocional.
+ *
+ * @param precoNormal - Preço de tabela do produto.
+ * @param promocao - Flags e valores de promoção do cadastro.
+ * @param quantidade - Quantidade (unidades) no carrinho para aquela linha.
+ * @returns Preço unitário a cobrar (normal ou promocional).
+ */
+export function precoEfetivo(
+  precoNormal: number,
+  promocao: PromocaoQuantidade,
+  quantidade: number,
+): number {
+  const {
+    promocaoAtiva,
+    quantidadeMinimaPromocao,
+    precoPromocional,
+  } = promocao;
+
+  if (
+    !promocaoAtiva ||
+    precoPromocional == null ||
+    quantidadeMinimaPromocao == null ||
+    quantidadeMinimaPromocao < 2 ||
+    !Number.isFinite(quantidade) ||
+    quantidade < quantidadeMinimaPromocao
+  ) {
+    return precoNormal;
+  }
+
+  return precoPromocional;
+}
+
+/**
+ * Indica se a promoção por quantidade está aplicada para a quantidade informada.
+ *
+ * @param promocao - Flags e valores de promoção do cadastro.
+ * @param quantidade - Quantidade (unidades) no carrinho.
+ * @returns `true` se o preço promocional deve ser usado.
+ */
+export function promocaoAplicada(
+  promocao: PromocaoQuantidade,
+  quantidade: number,
+): boolean {
+  return (
+    promocao.promocaoAtiva &&
+    promocao.precoPromocional != null &&
+    promocao.quantidadeMinimaPromocao != null &&
+    promocao.quantidadeMinimaPromocao >= 2 &&
+    Number.isFinite(quantidade) &&
+    quantidade >= promocao.quantidadeMinimaPromocao
+  );
+}
+
+/**
  * Gera um código de venda único para a sessão de caixa (ainda não persistido).
  * Persistência da Sale ocorre no fechamento (Prompt 5).
  *

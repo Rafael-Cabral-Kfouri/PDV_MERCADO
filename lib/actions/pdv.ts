@@ -12,13 +12,19 @@ export type PdvProduct = {
   quantidadeEstoque: number;
   unidadeVenda: UnidadeVenda;
   fotoUrl: string | null;
+  /** Se true, o produto tem promoção por quantidade no cadastro. */
+  promocaoAtiva: boolean;
+  /** Quantidade mínima de unidades para aplicar o preço promocional. */
+  quantidadeMinimaPromocao: number | null;
+  /** Preço unitário promocional (null se não configurado). */
+  precoPromocional: number | null;
 };
 
 /**
  * Mapeia o registro Prisma para o DTO usado na tela do PDV.
  *
  * @param produto - Linha de Product do banco.
- * @returns Produto com números JS e unidade de venda.
+ * @returns Produto com números JS, unidade de venda e dados de promoção.
  */
 function toPdvProduct(produto: {
   id: string;
@@ -28,6 +34,9 @@ function toPdvProduct(produto: {
   quantidadeEstoque: { toString(): string } | number;
   unidadeVenda: UnidadeVenda;
   fotoUrl: string | null;
+  promocaoAtiva: boolean;
+  quantidadeMinimaPromocao: number | null;
+  precoPromocional: { toString(): string } | number | null;
 }): PdvProduct {
   return {
     id: produto.id,
@@ -37,6 +46,12 @@ function toPdvProduct(produto: {
     quantidadeEstoque: Number(produto.quantidadeEstoque),
     unidadeVenda: produto.unidadeVenda,
     fotoUrl: produto.fotoUrl,
+    promocaoAtiva: produto.promocaoAtiva,
+    quantidadeMinimaPromocao: produto.quantidadeMinimaPromocao,
+    precoPromocional:
+      produto.precoPromocional == null
+        ? null
+        : Number(produto.precoPromocional),
   };
 }
 

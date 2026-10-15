@@ -17,6 +17,10 @@ export default async function AdminProdutosPage() {
     unidadeVenda: p.unidadeVenda,
     fotoUrl: p.fotoUrl,
     dataValidade: formatDateInputValue(p.dataValidade) || null,
+    promocaoAtiva: p.promocaoAtiva,
+    quantidadeMinimaPromocao: p.quantidadeMinimaPromocao,
+    precoPromocional:
+      p.precoPromocional == null ? null : p.precoPromocional.toString(),
   }));
 
   return (

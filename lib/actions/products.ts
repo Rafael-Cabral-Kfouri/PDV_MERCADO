@@ -64,7 +64,7 @@ function parseUnidadeVenda(raw: string): UnidadeVenda | null {
  * Cria ou atualiza um produto. A foto (`foto`) é opcional (JPG/PNG/WebP, máx. 2 MB).
  *
  * @param _prev - Estado anterior (compatível com useActionState, não usado).
- * @param formData - Campos: id?, nome, codigoBarras, precoUnitario, quantidadeEstoque, unidadeVenda, dataValidade?, foto?, removerFoto?.
+ * @param formData - Campos: id?, nome, codigoBarras, precoUnitario, quantidadeEstoque, unidadeVenda, dataValidade?, promocaoAtiva?, quantidadeMinimaPromocao?, precoPromocional?, foto?, removerFoto?.
  * @returns Resultado com sucesso/erro para exibir toast.
  */
 export async function salvarProdutoAction(
@@ -85,6 +85,11 @@ export async function salvarProdutoAction(
     const unidadeVenda = parseUnidadeVenda(
       String(formData.get("unidadeVenda") ?? "UNIDADE"),
     );
+    const promocaoAtivaRaw = formData.get("promocaoAtiva") === "on";
+    const qtdMinimaRaw = String(
+      formData.get("quantidadeMinimaPromocao") ?? "",
+    ).trim();
+    const precoPromoRaw = String(formData.get("precoPromocional") ?? "");
     const removerFoto = formData.get("removerFoto") === "on";
     const fotoEntry = formData.get("foto");
     const fotoFile =
@@ -142,6 +147,44 @@ export async function salvarProdutoAction(
       quantidadeEstoque = Number(estoqueParsed.toFixed(3));
     }
 
+    // Promoção por quantidade só se aplica a produtos cobrados por unidade.
+    let promocaoAtiva = false;
+    let quantidadeMinimaPromocao: number | null = null;
+    let precoPromocional: Prisma.Decimal | null = null;
+
+    if (promocaoAtivaRaw) {
+      if (unidadeVenda === UnidadeVenda.KG) {
+        return {
+          ok: false,
+          message:
+            "Promoção por quantidade só está disponível para produtos cobrados por unidade.",
+        };
+      }
+
+      const qtdMinima = Number.parseInt(qtdMinimaRaw, 10);
+      if (!Number.isFinite(qtdMinima) || qtdMinima < 2) {
+        return {
+          ok: false,
+          message: "Quantidade mínima da promoção deve ser no mínimo 2.",
+        };
+      }
+
+      const precoPromo = parseCurrencyBRL(precoPromoRaw);
+      if (!Number.isFinite(precoPromo) || precoPromo <= 0) {
+        return { ok: false, message: "Preço promocional inválido." };
+      }
+      if (precoPromo >= preco) {
+        return {
+          ok: false,
+          message: "O preço promocional deve ser menor que o preço unitário.",
+        };
+      }
+
+      promocaoAtiva = true;
+      quantidadeMinimaPromocao = qtdMinima;
+      precoPromocional = new Prisma.Decimal(precoPromo.toFixed(2));
+    }
+
     const data: {
       nome: string;
       codigoBarras: string;
@@ -149,6 +192,9 @@ export async function salvarProdutoAction(
       quantidadeEstoque: Prisma.Decimal;
       unidadeVenda: UnidadeVenda;
       dataValidade: Date | null;
+      promocaoAtiva: boolean;
+      quantidadeMinimaPromocao: number | null;
+      precoPromocional: Prisma.Decimal | null;
       fotoUrl?: string | null;
     } = {
       nome,
@@ -157,6 +203,9 @@ export async function salvarProdutoAction(
       quantidadeEstoque: new Prisma.Decimal(quantidadeEstoque.toFixed(3)),
       unidadeVenda,
       dataValidade,
+      promocaoAtiva,
+      quantidadeMinimaPromocao,
+      precoPromocional,
     };
 
     if (id) {

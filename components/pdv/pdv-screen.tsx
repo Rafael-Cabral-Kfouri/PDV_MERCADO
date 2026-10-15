@@ -14,6 +14,8 @@ import {
   gerarCodigoVenda,
   parseQtyPrefix,
   pareceCodigoBarras,
+  precoEfetivo,
+  promocaoAplicada,
 } from "@/lib/pdv-utils";
 import { PaymentModal } from "@/components/pdv/payment-modal";
 import { WeightModal } from "@/components/pdv/weight-modal";
@@ -31,9 +33,53 @@ export type CartItem = {
   codigoBarras: string;
   nome: string;
   quantidade: number;
+  /** Preço de tabela (sem promoção). */
+  precoNormal: number;
+  /** Preço unitário efetivo (normal ou promocional). */
   precoUnitario: number;
   unidadeVenda: UnidadeVenda;
+  promocaoAtiva: boolean;
+  quantidadeMinimaPromocao: number | null;
+  precoPromocional: number | null;
 };
+
+/**
+ * Extrai os dados de promoção de um produto do PDV.
+ *
+ * @param produto - Produto buscado no caixa.
+ * @returns Flags e valores usados por `precoEfetivo` / `promocaoAplicada`.
+ */
+function promoDoProduto(produto: PdvProduct) {
+  return {
+    promocaoAtiva:
+      produto.promocaoAtiva && produto.unidadeVenda === "UNIDADE",
+    quantidadeMinimaPromocao: produto.quantidadeMinimaPromocao,
+    precoPromocional: produto.precoPromocional,
+  };
+}
+
+/**
+ * Monta (ou atualiza) uma linha do carrinho recalculando o preço efetivo.
+ *
+ * @param base - Campos fixos da linha (sem quantidade/preço efetivo).
+ * @param quantidade - Quantidade atual da linha.
+ * @returns Linha completa com `precoUnitario` já considerando promoção.
+ */
+function linhaComPreco(
+  base: Omit<CartItem, "quantidade" | "precoUnitario">,
+  quantidade: number,
+): CartItem {
+  const unitario = precoEfetivo(
+    base.precoNormal,
+    {
+      promocaoAtiva: base.promocaoAtiva,
+      quantidadeMinimaPromocao: base.quantidadeMinimaPromocao,
+      precoPromocional: base.precoPromocional,
+    },
+    quantidade,
+  );
+  return { ...base, quantidade, precoUnitario: unitario };
+}
 
 type PdvScreenProps = {
   operadorNome: string;
@@ -199,40 +245,74 @@ export function PdvScreen({ operadorNome, isAdmin, loja }: PdvScreenProps) {
         return;
       }
 
+      const promo = promoDoProduto(produto);
+      const qtyAtual =
+        itens.find((i) => i.produtoId === produto.id)?.quantidade ?? 0;
+      const novaQtyTotal = qtyAtual + qty;
+      if (novaQtyTotal > produto.quantidadeEstoque) {
+        setFeedback(
+          `Estoque insuficiente: ${produto.nome} (disp. ${produto.quantidadeEstoque}).`,
+        );
+        focarInput();
+        return;
+      }
+
+      const unitarioEfetivo = precoEfetivo(
+        produto.precoUnitario,
+        promo,
+        novaQtyTotal,
+      );
+
       setItens((prev) => {
         const idx = prev.findIndex((i) => i.produtoId === produto.id);
         if (idx >= 0) {
-          const novaQty = prev[idx].quantidade + qty;
-          if (novaQty > produto.quantidadeEstoque) {
-            setFeedback(
-              `Estoque insuficiente: ${produto.nome} (disp. ${produto.quantidadeEstoque}).`,
-            );
-            return prev;
-          }
+          const atual = prev[idx];
           const next = [...prev];
-          next[idx] = { ...next[idx], quantidade: novaQty };
+          next[idx] = linhaComPreco(
+            {
+              lineId: atual.lineId,
+              produtoId: atual.produtoId,
+              codigoBarras: atual.codigoBarras,
+              nome: atual.nome,
+              precoNormal: atual.precoNormal,
+              unidadeVenda: atual.unidadeVenda,
+              promocaoAtiva: atual.promocaoAtiva,
+              quantidadeMinimaPromocao: atual.quantidadeMinimaPromocao,
+              precoPromocional: atual.precoPromocional,
+            },
+            atual.quantidade + qty,
+          );
           return next;
         }
         return [
           ...prev,
-          {
-            lineId: `${produto.id}-${Date.now()}`,
-            produtoId: produto.id,
-            codigoBarras: produto.codigoBarras,
-            nome: produto.nome,
-            quantidade: qty,
-            precoUnitario: produto.precoUnitario,
-            unidadeVenda: produto.unidadeVenda,
-          },
+          linhaComPreco(
+            {
+              lineId: `${produto.id}-${Date.now()}`,
+              produtoId: produto.id,
+              codigoBarras: produto.codigoBarras,
+              nome: produto.nome,
+              precoNormal: produto.precoUnitario,
+              unidadeVenda: produto.unidadeVenda,
+              promocaoAtiva: promo.promocaoAtiva,
+              quantidadeMinimaPromocao: promo.quantidadeMinimaPromocao,
+              precoPromocional: promo.precoPromocional,
+            },
+            qty,
+          ),
         ];
       });
       setInput("");
       setSugestoes([]);
       setUltimoProduto(produto);
-      setFeedback(`${produto.nome} · +${qty}`);
+      setFeedback(
+        promocaoAplicada(promo, novaQtyTotal)
+          ? `${produto.nome} · +${qty} · Promoção aplicada (${formatCurrencyBRL(unitarioEfetivo)}/un)`
+          : `${produto.nome} · +${qty}`,
+      );
       focarInput();
     },
-    [caixaOcupado, focarInput],
+    [caixaOcupado, focarInput, itens],
   );
 
   /**
@@ -267,20 +347,39 @@ export function PdvScreen({ operadorNome, isAdmin, loja }: PdvScreenProps) {
             return prev;
           }
           const next = [...prev];
-          next[idx] = { ...next[idx], quantidade: novaQty };
+          const atual = prev[idx];
+          next[idx] = linhaComPreco(
+            {
+              lineId: atual.lineId,
+              produtoId: atual.produtoId,
+              codigoBarras: atual.codigoBarras,
+              nome: atual.nome,
+              precoNormal: atual.precoNormal,
+              unidadeVenda: atual.unidadeVenda,
+              promocaoAtiva: false,
+              quantidadeMinimaPromocao: null,
+              precoPromocional: null,
+            },
+            novaQty,
+          );
           return next;
         }
         return [
           ...prev,
-          {
-            lineId: `${produto.id}-${Date.now()}`,
-            produtoId: produto.id,
-            codigoBarras: produto.codigoBarras,
-            nome: produto.nome,
-            quantidade: qty,
-            precoUnitario: produto.precoUnitario,
-            unidadeVenda: "KG",
-          },
+          linhaComPreco(
+            {
+              lineId: `${produto.id}-${Date.now()}`,
+              produtoId: produto.id,
+              codigoBarras: produto.codigoBarras,
+              nome: produto.nome,
+              precoNormal: produto.precoUnitario,
+              unidadeVenda: "KG",
+              promocaoAtiva: false,
+              quantidadeMinimaPromocao: null,
+              precoPromocional: null,
+            },
+            qty,
+          ),
         ];
       });
       setPesoPendente(null);
@@ -446,7 +545,23 @@ export function PdvScreen({ operadorNome, isAdmin, loja }: PdvScreenProps) {
         : Math.floor(quantidade);
     if (unidadeVenda === "UNIDADE" && qty < 1) return;
     setItens((prev) =>
-      prev.map((i) => (i.lineId === lineId ? { ...i, quantidade: qty } : i)),
+      prev.map((i) => {
+        if (i.lineId !== lineId) return i;
+        return linhaComPreco(
+          {
+            lineId: i.lineId,
+            produtoId: i.produtoId,
+            codigoBarras: i.codigoBarras,
+            nome: i.nome,
+            precoNormal: i.precoNormal,
+            unidadeVenda: i.unidadeVenda,
+            promocaoAtiva: i.promocaoAtiva,
+            quantidadeMinimaPromocao: i.quantidadeMinimaPromocao,
+            precoPromocional: i.precoPromocional,
+          },
+          qty,
+        );
+      }),
     );
   }
 
@@ -722,6 +837,14 @@ export function PdvScreen({ operadorNome, isAdmin, loja }: PdvScreenProps) {
                     {formatCurrencyBRL(ultimoProduto.precoUnitario)}
                     {ultimoProduto.unidadeVenda === "KG" ? "/kg" : ""}
                   </p>
+                  {ultimoProduto.promocaoAtiva &&
+                  ultimoProduto.quantidadeMinimaPromocao != null &&
+                  ultimoProduto.precoPromocional != null ? (
+                    <p className="text-xs text-amber-300">
+                      Promo ≥{ultimoProduto.quantidadeMinimaPromocao} un ·{" "}
+                      {formatCurrencyBRL(ultimoProduto.precoPromocional)}
+                    </p>
+                  ) : null}
                 </div>
               </div>
             ) : null}
@@ -755,62 +878,104 @@ export function PdvScreen({ operadorNome, isAdmin, loja }: PdvScreenProps) {
                       </td>
                     </tr>
                   ) : (
-                    itens.map((item, index) => (
-                      <tr
-                        key={item.lineId}
-                        className="border-t border-zinc-800 text-zinc-100"
-                      >
-                        <td className="px-3 py-2 tabular-nums text-zinc-400">
-                          {index + 1}
-                        </td>
-                        <td className="px-3 py-2 font-mono text-xs">
-                          {item.codigoBarras}
-                        </td>
-                        <td className="px-3 py-2">{item.nome}</td>
-                        <td className="px-3 py-2">
-                          <div className="flex items-center gap-1">
-                            <input
-                              type="number"
-                              min={item.unidadeVenda === "KG" ? 0.001 : 1}
-                              step={item.unidadeVenda === "KG" ? 0.001 : 1}
-                              value={item.quantidade}
-                              onChange={(e) =>
-                                alterarQuantidade(
-                                  item.lineId,
-                                  Number(e.target.value),
-                                  item.unidadeVenda,
-                                )
-                              }
-                              onBlur={focarInput}
-                              className="w-20 rounded border border-zinc-600 bg-zinc-900 px-2 py-1 text-center outline-none focus:ring-1 focus:ring-emerald-500"
-                            />
-                            <span className="text-xs text-zinc-500">
-                              {item.unidadeVenda === "KG" ? "kg" : "un"}
-                            </span>
-                          </div>
-                        </td>
-                        <td className="px-3 py-2 tabular-nums">
-                          {formatCurrencyBRL(item.precoUnitario)}
-                          {item.unidadeVenda === "KG" ? (
-                            <span className="text-xs text-zinc-500">/kg</span>
-                          ) : null}
-                        </td>
-                        <td className="px-3 py-2 font-medium tabular-nums">
-                          {formatCurrencyBRL(
-                            item.quantidade * item.precoUnitario,
-                          )}
-                        </td>
-                        <td className="px-3 py-2">
-                          <button
-                            type="button"
-                            onClick={() => removerItem(item.lineId)}
-                            className="text-xs text-red-400 hover:underline"
-                          >
-                            Remover
-                          </button>
-                        </td>
-                      </tr>
-                    ))
+                    itens.map((item, index) => {
+                      const emPromo = promocaoAplicada(
+                        {
+                          promocaoAtiva: item.promocaoAtiva,
+                          quantidadeMinimaPromocao:
+                            item.quantidadeMinimaPromocao,
+                          precoPromocional: item.precoPromocional,
+                        },
+                        item.quantidade,
+                      );
+                      return (
+                        <tr
+                          key={item.lineId}
+                          className="border-t border-zinc-800 text-zinc-100"
+                        >
+                          <td className="px-3 py-2 tabular-nums text-zinc-400">
+                            {index + 1}
+                          </td>
+                          <td className="px-3 py-2 font-mono text-xs">
+                            {item.codigoBarras}
+                          </td>
+                          <td className="px-3 py-2">
+                            <div className="flex flex-col gap-0.5">
+                              <span>{item.nome}</span>
+                              {emPromo ? (
+                                <span className="w-fit rounded bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-semibold tracking-wide text-amber-300 uppercase">
+                                  Promo · a partir de{" "}
+                                  {item.quantidadeMinimaPromocao} un
+                                </span>
+                              ) : item.promocaoAtiva &&
+                                item.quantidadeMinimaPromocao != null ? (
+                                <span className="text-[10px] text-zinc-500">
+                                  Promo a partir de{" "}
+                                  {item.quantidadeMinimaPromocao} un
+                                </span>
+                              ) : null}
+                            </div>
+                          </td>
+                          <td className="px-3 py-2">
+                            <div className="flex items-center gap-1">
+                              <input
+                                type="number"
+                                min={item.unidadeVenda === "KG" ? 0.001 : 1}
+                                step={item.unidadeVenda === "KG" ? 0.001 : 1}
+                                value={item.quantidade}
+                                onChange={(e) =>
+                                  alterarQuantidade(
+                                    item.lineId,
+                                    Number(e.target.value),
+                                    item.unidadeVenda,
+                                  )
+                                }
+                                onBlur={focarInput}
+                                className="w-20 rounded border border-zinc-600 bg-zinc-900 px-2 py-1 text-center outline-none focus:ring-1 focus:ring-emerald-500"
+                              />
+                              <span className="text-xs text-zinc-500">
+                                {item.unidadeVenda === "KG" ? "kg" : "un"}
+                              </span>
+                            </div>
+                          </td>
+                          <td className="px-3 py-2 tabular-nums">
+                            {emPromo ? (
+                              <div className="flex flex-col">
+                                <span className="text-xs text-zinc-500 line-through">
+                                  {formatCurrencyBRL(item.precoNormal)}
+                                </span>
+                                <span className="font-medium text-amber-300">
+                                  {formatCurrencyBRL(item.precoUnitario)}
+                                </span>
+                              </div>
+                            ) : (
+                              <>
+                                {formatCurrencyBRL(item.precoUnitario)}
+                                {item.unidadeVenda === "KG" ? (
+                                  <span className="text-xs text-zinc-500">
+                                    /kg
+                                  </span>
+                                ) : null}
+                              </>
+                            )}
+                          </td>
+                          <td className="px-3 py-2 font-medium tabular-nums">
+                            {formatCurrencyBRL(
+                              item.quantidade * item.precoUnitario,
+                            )}
+                          </td>
+                          <td className="px-3 py-2">
+                            <button
+                              type="button"
+                              onClick={() => removerItem(item.lineId)}
+                              className="text-xs text-red-400 hover:underline"
+                            >
+                              Remover
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })
                   )}
                 </tbody>
               </table>
