@@ -45,8 +45,21 @@ O navegador abre em `http://localhost:3000`.
 | `instalar-pdv.bat` | Primeira instalação (dependências, migrate, seed, build) |
 | `iniciar-pdv.bat` | Ligar o PDV em produção |
 | `reconstruir-pdv.bat` | Refazer o build (ex.: erro `@prisma/client-...`) |
+| `backup-pdv.bat` | Backup do banco (pg_dump) + fotos em `backups\` |
 
 Para subir junto com o Windows: Agendador de Tarefas → ao logon → executar `iniciar-pdv.bat`.
+
+### Backup e restauração
+
+1. Rode `backup-pdv.bat` (gera `backups\pdv_AAAA-MM-DD_HH-MM.zip` com dump + `public\uploads\produtos`).
+2. Mantém só os 30 zips mais recentes.
+3. **Agendar diário:** Agendador de Tarefas → criar tarefa básica → diariamente → ação “Iniciar um programa” → programa = caminho completo de `backup-pdv.bat` → iniciar em = pasta do projeto.
+4. **Restaurar (Postgres nativo):** extraia o `.dump` do zip e rode  
+   `pg_restore -h localhost -U SEU_USUARIO -d pdv_mercado --clean --if-exists caminho\pdv_....dump`  
+   (defina `PGPASSWORD` se necessário). Depois copie a pasta `produtos` de volta para `public\uploads\produtos`.
+5. **Restaurar (Docker):**  
+   `docker cp caminho\pdv_....dump pdv_mercado_db:/tmp/restore.dump`  
+   `docker exec -e PGPASSWORD=SENHA pdv_mercado_db pg_restore -U pdv -d pdv_mercado --clean --if-exists /tmp/restore.dump`
 
 Se o `iniciar-pdv.bat` falhar com `Cannot find module '@prisma/client-...'`, rode **`reconstruir-pdv.bat`** e depois `iniciar-pdv.bat` de novo.
 
@@ -67,7 +80,8 @@ No admin → Produtos, use **Importar nota fiscal (XML)** para enviar o XML da N
 | `admin@pdv.local` | `admin123` | `/admin/dashboard` |
 | `operador@pdv.local` | `operador123` | `/pdv` |
 
-Altere essas senhas em produção.
+**Altere essas senhas padrão assim que possível** (produção e PC do mercado).  
+Você pode definir `SEED_ADMIN_PASSWORD` e `SEED_OPERADOR_PASSWORD` no `.env` antes de rodar o seed (veja `.env.example`).
 
 ## npm (desenvolvimento)
 

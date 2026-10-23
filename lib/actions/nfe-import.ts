@@ -3,6 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { Prisma, UnidadeVenda } from "@prisma/client";
 import { requireAdmin } from "@/lib/auth-guards";
+import { registrarAuditoria } from "@/lib/audit";
+import { AppError, mensagemDeErro } from "@/lib/errors";
 import { parseNfeXml } from "@/lib/nfe-xml";
 import { prisma } from "@/lib/prisma";
 
@@ -74,7 +76,7 @@ async function gerarCodigoInternoUnico(): Promise<string> {
     });
     if (!existente) return codigo;
   }
-  throw new Error("Não foi possível gerar código interno único.");
+  throw new AppError("Não foi possível gerar código interno único.");
 }
 
 /**
@@ -122,7 +124,16 @@ export async function parseNfeXmlAction(
     }
 
     const xml = await entry.text();
-    const parsed = parseNfeXml(xml);
+    let parsed;
+    try {
+      parsed = parseNfeXml(xml);
+    } catch (parseError) {
+      throw new AppError(
+        parseError instanceof Error
+          ? parseError.message
+          : "Erro ao ler o XML da nota.",
+      );
+    }
 
     const barcodes = parsed.itens
       .map((i) => i.codigoBarras)
@@ -188,8 +199,7 @@ export async function parseNfeXmlAction(
   } catch (error) {
     return {
       ok: false,
-      message:
-        error instanceof Error ? error.message : "Erro ao ler o XML da nota.",
+      message: mensagemDeErro(error, "Erro ao ler o XML da nota."),
     };
   }
 }
@@ -207,9 +217,10 @@ export async function parseNfeXmlAction(
  */
 export async function importarNfeItensAction(
   itens: NfeImportItemInput[],
+  meta?: { numeroNota?: string | null; emitente?: string | null },
 ): Promise<NfeImportResult> {
   try {
-    await requireAdmin();
+    const session = await requireAdmin();
 
     if (!Array.isArray(itens) || itens.length === 0) {
       return { ok: false, message: "Nenhum item para importar." };
@@ -357,6 +368,21 @@ export async function importarNfeItensAction(
           criados += 1;
         }
       }
+
+      await registrarAuditoria(tx, {
+        usuarioId: session.user.id,
+        acao: "NFE_IMPORTADA",
+        entidade: "NfeImport",
+        entidadeId: meta?.numeroNota ?? null,
+        detalhes: {
+          numeroNota: meta?.numeroNota ?? null,
+          emitente: meta?.emitente ?? null,
+          criados,
+          atualizados,
+          ignorados,
+          itensSelecionados: preparados.length,
+        },
+      });
     });
 
     revalidatePath("/admin/produtos");
@@ -386,8 +412,7 @@ export async function importarNfeItensAction(
     }
     return {
       ok: false,
-      message:
-        error instanceof Error ? error.message : "Erro ao importar itens da nota.",
+      message: mensagemDeErro(error, "Erro ao importar itens da nota."),
     };
   }
 }

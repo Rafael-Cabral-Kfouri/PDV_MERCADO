@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { requireAdmin, requireAuth } from "@/lib/auth-guards";
+import { mensagemDeErro } from "@/lib/errors";
 import { prisma } from "@/lib/prisma";
 
 export type StoreSettingsDTO = {
@@ -107,8 +108,7 @@ export async function salvarConfigLojaAction(
   } catch (error) {
     return {
       ok: false,
-      message:
-        error instanceof Error ? error.message : "Erro ao salvar configurações.",
+      message: mensagemDeErro(error, "Erro ao salvar configurações."),
     };
   }
 }
