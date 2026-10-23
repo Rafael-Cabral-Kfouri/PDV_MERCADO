@@ -4,6 +4,8 @@ import { revalidatePath } from "next/cache";
 import { hash } from "bcryptjs";
 import { Prisma, Role } from "@prisma/client";
 import { requireAdmin } from "@/lib/auth-guards";
+import { registrarAuditoria } from "@/lib/audit";
+import { mensagemDeErro } from "@/lib/errors";
 import { onlyDigits } from "@/lib/format";
 import { prisma } from "@/lib/prisma";
 
@@ -24,7 +26,7 @@ export async function salvarFuncionarioAction(
   formData: FormData,
 ): Promise<EmployeeActionResult> {
   try {
-    await requireAdmin();
+    const session = await requireAdmin();
 
     const id = String(formData.get("id") ?? "").trim() || null;
     const nome = String(formData.get("nome") ?? "").trim();
@@ -66,20 +68,50 @@ export async function salvarFuncionarioAction(
       endereco,
     };
 
+    // Detalhes de auditoria sem senha nem hash.
+    const detalhesPublicos = {
+      nome,
+      email,
+      funcao,
+      cpf: cpf || null,
+      rg,
+      telefone,
+      endereco,
+      senhaAlterada: Boolean(senha),
+    };
+
     if (id) {
       const data = senha
         ? { ...baseData, senhaHash: await hash(senha, 10) }
         : baseData;
-      await prisma.user.update({ where: { id }, data });
+      await prisma.$transaction(async (tx) => {
+        await tx.user.update({ where: { id }, data });
+        await registrarAuditoria(tx, {
+          usuarioId: session.user.id,
+          acao: "FUNCIONARIO_ALTERADO",
+          entidade: "User",
+          entidadeId: id,
+          detalhes: detalhesPublicos,
+        });
+      });
       revalidatePath("/admin/funcionarios");
       return { ok: true, message: "Funcionário atualizado com sucesso." };
     }
 
-    await prisma.user.create({
-      data: {
-        ...baseData,
-        senhaHash: await hash(senha, 10),
-      },
+    await prisma.$transaction(async (tx) => {
+      const criado = await tx.user.create({
+        data: {
+          ...baseData,
+          senhaHash: await hash(senha, 10),
+        },
+      });
+      await registrarAuditoria(tx, {
+        usuarioId: session.user.id,
+        acao: "FUNCIONARIO_CRIADO",
+        entidade: "User",
+        entidadeId: criado.id,
+        detalhes: detalhesPublicos,
+      });
     });
     revalidatePath("/admin/funcionarios");
     return { ok: true, message: "Funcionário cadastrado com sucesso." };
@@ -95,8 +127,7 @@ export async function salvarFuncionarioAction(
     }
     return {
       ok: false,
-      message:
-        error instanceof Error ? error.message : "Erro ao salvar funcionário.",
+      message: mensagemDeErro(error, "Erro ao salvar funcionário."),
     };
   }
 }
@@ -117,7 +148,28 @@ export async function excluirFuncionarioAction(
       return { ok: false, message: "Você não pode excluir o próprio usuário." };
     }
 
-    await prisma.user.delete({ where: { id } });
+    const alvo = await prisma.user.findUnique({
+      where: { id },
+      select: { id: true, nome: true, email: true, funcao: true },
+    });
+    if (!alvo) {
+      return { ok: false, message: "Funcionário não encontrado." };
+    }
+
+    await prisma.$transaction(async (tx) => {
+      await tx.user.delete({ where: { id } });
+      await registrarAuditoria(tx, {
+        usuarioId: session.user.id,
+        acao: "FUNCIONARIO_EXCLUIDO",
+        entidade: "User",
+        entidadeId: id,
+        detalhes: {
+          nome: alvo.nome,
+          email: alvo.email,
+          funcao: alvo.funcao,
+        },
+      });
+    });
     revalidatePath("/admin/funcionarios");
     return { ok: true, message: "Funcionário excluído com sucesso." };
   } catch (error) {
@@ -132,8 +184,7 @@ export async function excluirFuncionarioAction(
     }
     return {
       ok: false,
-      message:
-        error instanceof Error ? error.message : "Erro ao excluir funcionário.",
+      message: mensagemDeErro(error, "Erro ao excluir funcionário."),
     };
   }
 }

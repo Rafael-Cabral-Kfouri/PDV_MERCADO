@@ -144,7 +144,10 @@ export function NfeImportPanel() {
     }));
 
     startTransition(async () => {
-      const result = await importarNfeItensAction(payload);
+      const result = await importarNfeItensAction(payload, {
+        numeroNota: meta?.numeroNota,
+        emitente: meta?.emitente,
+      });
       toast(result.message, result.ok ? "success" : "error");
       if (result.ok) {
         cancelarRevisao();

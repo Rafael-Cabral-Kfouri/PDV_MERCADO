@@ -4,6 +4,11 @@ import { AuthError } from "next-auth";
 import bcrypt from "bcryptjs";
 import { redirect } from "next/navigation";
 import { signIn, signOut } from "@/auth";
+import {
+  limparTentativasLogin,
+  registrarFalhaLogin,
+  verificarBloqueioLogin,
+} from "@/lib/login-rate-limit";
 import { prisma } from "@/lib/prisma";
 
 export type LoginState = {
@@ -13,6 +18,7 @@ export type LoginState = {
 /**
  * Autentica o usuário com e-mail e senha e redireciona conforme a função.
  * ADMIN → `/admin/dashboard` | CASHIER → `/pdv`.
+ * Limita a 5 tentativas falhas por e-mail em 15 minutos (Map em memória).
  *
  * @param _prevState - Estado anterior do formulário (useActionState).
  * @param formData - FormData com campos `email` e `password`.
@@ -29,15 +35,30 @@ export async function loginAction(
     return { error: "Informe e-mail e senha." };
   }
 
+  const bloqueio = verificarBloqueioLogin(email);
+  if (bloqueio.bloqueado) {
+    return { error: bloqueio.message };
+  }
+
   const user = await prisma.user.findUnique({ where: { email } });
   if (!user) {
+    const aposFalha = registrarFalhaLogin(email);
+    if (aposFalha.bloqueado) {
+      return { error: aposFalha.message };
+    }
     return { error: "E-mail ou senha inválidos." };
   }
 
   const senhaValida = await bcrypt.compare(password, user.senhaHash);
   if (!senhaValida) {
+    const aposFalha = registrarFalhaLogin(email);
+    if (aposFalha.bloqueado) {
+      return { error: aposFalha.message };
+    }
     return { error: "E-mail ou senha inválidos." };
   }
+
+  limparTentativasLogin(email);
 
   const redirectTo =
     user.funcao === "ADMIN" ? "/admin/dashboard" : "/pdv";
@@ -50,6 +71,10 @@ export async function loginAction(
     });
   } catch (error) {
     if (error instanceof AuthError) {
+      const aposFalha = registrarFalhaLogin(email);
+      if (aposFalha.bloqueado) {
+        return { error: aposFalha.message };
+      }
       return { error: "E-mail ou senha inválidos." };
     }
     throw error;

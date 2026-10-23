@@ -1,7 +1,9 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { auth } from "@/auth";
 import { logoutAction } from "@/lib/actions/auth";
 import { ToastProvider } from "@/components/ui/toast";
+import { prisma } from "@/lib/prisma";
 
 const navItems = [
   { href: "/admin/dashboard", label: "Painel" },
@@ -13,6 +15,7 @@ const navItems = [
 
 /**
  * Layout do painel administrativo com navegação e toasts.
+ * Revalida o usuário no banco: excluído → `/login`; rebaixado → `/pdv`.
  *
  * @param children - Página filha renderizada na área de conteúdo.
  */
@@ -22,6 +25,21 @@ export default async function AdminLayout({
   children: React.ReactNode;
 }) {
   const session = await auth();
+  if (!session?.user?.id) {
+    redirect("/login");
+  }
+
+  const user = await prisma.user.findUnique({
+    where: { id: session.user.id },
+    select: { nome: true, funcao: true },
+  });
+
+  if (!user) {
+    redirect("/login");
+  }
+  if (user.funcao !== "ADMIN") {
+    redirect("/pdv");
+  }
 
   return (
     <ToastProvider>
@@ -36,7 +54,7 @@ export default async function AdminLayout({
                 Painel Administrativo
               </h1>
               <p className="text-sm text-zinc-500">
-                {session?.user?.nome} · Gerente
+                {user.nome} · Gerente
               </p>
             </div>
             <nav className="flex flex-wrap items-center gap-2">

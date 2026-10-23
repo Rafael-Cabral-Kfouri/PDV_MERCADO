@@ -2,6 +2,7 @@
 
 import { PaymentMethod, SaleStatus, UnidadeVenda } from "@prisma/client";
 import { requireAdmin } from "@/lib/auth-guards";
+import { AppError } from "@/lib/errors";
 import { prisma } from "@/lib/prisma";
 
 export type PeriodoPreset =
@@ -43,6 +44,8 @@ export type VendaRelatorioRow = {
   formaPagamento: PaymentMethod | null;
   status: SaleStatus;
   operadorNome: string;
+  /** Motivo preenchido quando a venda está cancelada. */
+  motivoCancelamento: string | null;
   itens: {
     produtoNome: string;
     codigoBarras: string;
@@ -225,7 +228,7 @@ function resolverPeriodo(filtros: RelatorioFiltros): {
     const ano = filtros.ano ?? hoje.y;
     const mes = filtros.mes ?? hoje.m;
     if (mes < 1 || mes > 12 || ano < 2000 || ano > 2100) {
-      throw new Error("Mês/ano inválidos.");
+      throw new AppError("Mês/ano inválidos.");
     }
     const inicioParts = { y: ano, m: mes, d: 1 };
     const next =
@@ -241,12 +244,12 @@ function resolverPeriodo(filtros: RelatorioFiltros): {
   const ini = parseYmd(filtros.dataInicio ?? "");
   const fimParts = parseYmd(filtros.dataFim ?? "");
   if (!ini || !fimParts) {
-    throw new Error("Informe data inicial e final no formato válido.");
+    throw new AppError("Informe data inicial e final no formato válido.");
   }
   const inicio = startOfDayBrasilUtc(ini);
   const fim = startOfDayBrasilUtc(addDays(fimParts, 1));
   if (inicio >= fim) {
-    throw new Error("A data inicial deve ser anterior ou igual à data final.");
+    throw new AppError("A data inicial deve ser anterior ou igual à data final.");
   }
   return {
     inicio,
@@ -284,8 +287,7 @@ export async function obterRelatorioVendas(
 
   const { inicio, fim, label } = resolverPeriodo(filtros);
 
-  const where = {
-    status: SaleStatus.CONCLUIDA,
+  const filtrosComuns = {
     dataVenda: { gte: inicio, lt: fim },
     ...(filtros.formaPagamento
       ? { formaPagamento: filtros.formaPagamento }
@@ -293,21 +295,31 @@ export async function obterRelatorioVendas(
     ...(filtros.operadorId ? { operadorId: filtros.operadorId } : {}),
   };
 
+  // Totais/ranking só com concluídas; a lista inclui canceladas (selo na UI).
+  const whereConcluidas = {
+    ...filtrosComuns,
+    status: SaleStatus.CONCLUIDA,
+  };
+  const whereLista = {
+    ...filtrosComuns,
+    status: { in: [SaleStatus.CONCLUIDA, SaleStatus.CANCELADA] },
+  };
+
   const [agg, porPagamentoRaw, vendasRaw, itensRaw] = await Promise.all([
     prisma.sale.aggregate({
-      where,
+      where: whereConcluidas,
       _sum: { total: true },
       _count: true,
       _avg: { total: true },
     }),
     prisma.sale.groupBy({
       by: ["formaPagamento"],
-      where,
+      where: whereConcluidas,
       _sum: { total: true },
       _count: true,
     }),
     prisma.sale.findMany({
-      where,
+      where: whereLista,
       include: {
         operador: { select: { nome: true } },
         itens: {
@@ -321,7 +333,7 @@ export async function obterRelatorioVendas(
       orderBy: { dataVenda: "desc" },
     }),
     prisma.saleItem.findMany({
-      where: { venda: where },
+      where: { venda: whereConcluidas },
       select: {
         produtoId: true,
         quantidade: true,
@@ -355,6 +367,7 @@ export async function obterRelatorioVendas(
     formaPagamento: v.formaPagamento,
     status: v.status,
     operadorNome: v.operador.nome,
+    motivoCancelamento: v.motivoCancelamento,
     itens: v.itens.map((i) => ({
       produtoNome: i.produto.nome,
       codigoBarras: i.produto.codigoBarras,

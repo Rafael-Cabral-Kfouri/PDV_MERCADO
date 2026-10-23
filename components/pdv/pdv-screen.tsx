@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
-import type { PaymentMethod } from "@prisma/client";
+import type { PaymentMethod, UnidadeVenda } from "@prisma/client";
 import {
   buscarProdutoPorCodigo,
   buscarProdutosSugestao,
@@ -23,75 +23,24 @@ import {
   SaleSuccessModal,
   type SaleSuccessInfo,
 } from "@/components/pdv/sale-success-modal";
-import { BarcodeInput } from "@/components/ui/barcode-input";
+import { PdvCartTable } from "@/components/pdv/pdv-cart-table";
+import { PdvSearchBar } from "@/components/pdv/pdv-search-bar";
+import { PdvSidebar } from "@/components/pdv/pdv-sidebar";
+import {
+  FORMA_LABEL,
+  linhaComPreco,
+  promoDoProduto,
+  type CartItem,
+} from "@/components/pdv/pdv-types";
+import { usePdvShortcuts } from "@/hooks/use-pdv-shortcuts";
 import type { StoreSettingsDTO } from "@/lib/actions/settings";
-import type { UnidadeVenda } from "@prisma/client";
 
-export type CartItem = {
-  lineId: string;
-  produtoId: string;
-  codigoBarras: string;
-  nome: string;
-  quantidade: number;
-  /** Preço de tabela (sem promoção). */
-  precoNormal: number;
-  /** Preço unitário efetivo (normal ou promocional). */
-  precoUnitario: number;
-  unidadeVenda: UnidadeVenda;
-  promocaoAtiva: boolean;
-  quantidadeMinimaPromocao: number | null;
-  precoPromocional: number | null;
-};
-
-/**
- * Extrai os dados de promoção de um produto do PDV.
- *
- * @param produto - Produto buscado no caixa.
- * @returns Flags e valores usados por `precoEfetivo` / `promocaoAplicada`.
- */
-function promoDoProduto(produto: PdvProduct) {
-  return {
-    promocaoAtiva:
-      produto.promocaoAtiva && produto.unidadeVenda === "UNIDADE",
-    quantidadeMinimaPromocao: produto.quantidadeMinimaPromocao,
-    precoPromocional: produto.precoPromocional,
-  };
-}
-
-/**
- * Monta (ou atualiza) uma linha do carrinho recalculando o preço efetivo.
- *
- * @param base - Campos fixos da linha (sem quantidade/preço efetivo).
- * @param quantidade - Quantidade atual da linha.
- * @returns Linha completa com `precoUnitario` já considerando promoção.
- */
-function linhaComPreco(
-  base: Omit<CartItem, "quantidade" | "precoUnitario">,
-  quantidade: number,
-): CartItem {
-  const unitario = precoEfetivo(
-    base.precoNormal,
-    {
-      promocaoAtiva: base.promocaoAtiva,
-      quantidadeMinimaPromocao: base.quantidadeMinimaPromocao,
-      precoPromocional: base.precoPromocional,
-    },
-    quantidade,
-  );
-  return { ...base, quantidade, precoUnitario: unitario };
-}
+export type { CartItem };
 
 type PdvScreenProps = {
   operadorNome: string;
   isAdmin: boolean;
   loja: StoreSettingsDTO;
-};
-
-const FORMA_LABEL: Record<PaymentMethod, string> = {
-  DINHEIRO: "Dinheiro",
-  CARTAO_CREDITO: "Cartão de crédito",
-  CARTAO_DEBITO: "Cartão de débito",
-  PIX: "PIX",
 };
 
 /**
@@ -468,8 +417,8 @@ export function PdvScreen({ operadorNome, isAdmin, loja }: PdvScreenProps) {
     const valor = input.trim();
     const { termo } = parseQtyPrefix(valor);
 
+    // Limpeza de sugestões curtas fica no onValueChange (evita setState síncrono no effect).
     if (!caixaOcupado || modalAberto || termo.length < 2 || pareceCodigoBarras(termo)) {
-      if (!pareceCodigoBarras(termo) && termo.length < 2) setSugestoes([]);
       return;
     }
 
@@ -484,37 +433,19 @@ export function PdvScreen({ operadorNome, isAdmin, loja }: PdvScreenProps) {
     };
   }, [input, caixaOcupado, modalAberto]);
 
-  useEffect(() => {
-    /**
-     * Atalhos: F2 nova · F4 finalizar · F8 cancelar · Esc limpa busca.
-     */
-    function onKeyDown(e: KeyboardEvent) {
-      if (modalAberto) return;
+  const limparBusca = useCallback(() => {
+    setSugestoes([]);
+    setInput("");
+    focarInput();
+  }, [focarInput]);
 
-      if (e.key === "F2") {
-        e.preventDefault();
-        iniciarVenda();
-        return;
-      }
-      if (e.key === "F4") {
-        e.preventDefault();
-        abrirFinalizacao();
-        return;
-      }
-      if (e.key === "F8") {
-        e.preventDefault();
-        cancelarVenda();
-        return;
-      }
-      if (e.key === "Escape") {
-        setSugestoes([]);
-        setInput("");
-        focarInput();
-      }
-    }
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [modalAberto, iniciarVenda, abrirFinalizacao, cancelarVenda, focarInput]);
+  usePdvShortcuts({
+    modalAberto,
+    onNovaVenda: iniciarVenda,
+    onFinalizar: abrirFinalizacao,
+    onCancelar: cancelarVenda,
+    onLimparBusca: limparBusca,
+  });
 
   /**
    * Remove um item do carrinho.
@@ -718,326 +649,47 @@ export function PdvScreen({ operadorNome, isAdmin, loja }: PdvScreenProps) {
 
       <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[1fr_320px]">
         <div className="flex min-h-0 flex-col gap-3 p-4">
-          <section className="relative shrink-0 rounded-xl border border-zinc-700 bg-zinc-950 p-4">
-            <label
-              htmlFor="pdv-input"
-              className="text-xs font-medium tracking-wide text-zinc-400 uppercase"
-            >
-              Bipar código · digitar nome · atalho 3*codigo
-            </label>
-            <BarcodeInput
-              ref={inputRef}
-              id="pdv-input"
-              value={input}
-              captureGlobal={!modalAberto}
-              onValueChange={(valor) => {
-                setInput(valor);
-                setFeedback(null);
-              }}
-              onConfirm={(valor) => {
-                void confirmarInput(valor);
-              }}
-              onKeyDown={(e) => {
-                if (e.key === "ArrowDown" && sugestoes.length > 0) {
-                  e.preventDefault();
-                  setSugestaoIndex((i) => (i + 1) % sugestoes.length);
-                  return;
-                }
-                if (e.key === "ArrowUp" && sugestoes.length > 0) {
-                  e.preventDefault();
-                  setSugestaoIndex(
-                    (i) => (i - 1 + sugestoes.length) % sugestoes.length,
-                  );
-                  return;
-                }
-              }}
-              placeholder={
-                caixaOcupado
-                  ? "Aguardando bipagem..."
-                  : "Pressione F2 para iniciar a venda"
+          <PdvSearchBar
+            inputRef={inputRef}
+            input={input}
+            caixaOcupado={caixaOcupado}
+            modalAberto={modalAberto}
+            buscando={buscando}
+            feedback={feedback}
+            sugestoes={sugestoes}
+            sugestaoIndex={sugestaoIndex}
+            ultimoProduto={ultimoProduto}
+            onInputChange={(valor) => {
+              setInput(valor);
+              setFeedback(null);
+              const { termo } = parseQtyPrefix(valor.trim());
+              if (!pareceCodigoBarras(termo) && termo.length < 2) {
+                setSugestoes([]);
               }
-              className="mt-2 w-full rounded-lg border border-zinc-600 bg-zinc-900 px-4 py-3 font-mono text-xl text-white outline-none ring-emerald-500 focus:ring-2"
-            />
+            }}
+            onConfirm={(valor) => {
+              void confirmarInput(valor);
+            }}
+            onSugestaoIndexChange={setSugestaoIndex}
+            onSelecionarSugestao={adicionarProduto}
+          />
 
-            {sugestoes.length > 0 ? (
-              <ul className="absolute right-4 left-4 z-20 mt-1 max-h-56 overflow-auto rounded-lg border border-zinc-600 bg-zinc-900 shadow-xl">
-                {sugestoes.map((s, idx) => (
-                  <li key={s.id}>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const { quantidade } = parseQtyPrefix(input);
-                        adicionarProduto(s, quantidade);
-                      }}
-                      className={`flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm ${
-                        idx === sugestaoIndex
-                          ? "bg-emerald-700 text-white"
-                          : "text-zinc-200 hover:bg-zinc-800"
-                      }`}
-                    >
-                      {s.fotoUrl ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          src={s.fotoUrl}
-                          alt=""
-                          className="h-8 w-8 shrink-0 rounded object-cover"
-                        />
-                      ) : (
-                        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded bg-zinc-800 text-[10px] text-zinc-500">
-                          —
-                        </span>
-                      )}
-                      <span className="min-w-0 flex-1 truncate">
-                        <span className="font-mono text-xs opacity-80">
-                          {s.codigoBarras}
-                        </span>{" "}
-                        {s.nome}
-                      </span>
-                      <span className="shrink-0 font-medium">
-                        {formatCurrencyBRL(s.precoUnitario)}
-                        {s.unidadeVenda === "KG" ? "/kg" : ""}
-                      </span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            ) : null}
-
-            <p className="mt-2 min-h-5 text-sm text-zinc-400">
-              {buscando
-                ? "Buscando…"
-                : feedback ??
-                  (caixaOcupado
-                    ? "Bipe o produto ou digite o nome para ver sugestões."
-                    : "Caixa livre — F2 inicia nova venda.")}
-            </p>
-
-            {ultimoProduto ? (
-              <div className="mt-3 flex items-center gap-3 rounded-lg border border-zinc-700 bg-zinc-900/80 p-3">
-                {ultimoProduto.fotoUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={ultimoProduto.fotoUrl}
-                    alt={ultimoProduto.nome}
-                    className="h-16 w-16 rounded-lg object-cover"
-                  />
-                ) : (
-                  <div className="flex h-16 w-16 items-center justify-center rounded-lg bg-zinc-800 text-xs text-zinc-500">
-                    Sem foto
-                  </div>
-                )}
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-medium text-white">
-                    {ultimoProduto.nome}
-                  </p>
-                  <p className="font-mono text-xs text-zinc-400">
-                    {ultimoProduto.codigoBarras}
-                  </p>
-                  <p className="text-sm text-emerald-400">
-                    {formatCurrencyBRL(ultimoProduto.precoUnitario)}
-                    {ultimoProduto.unidadeVenda === "KG" ? "/kg" : ""}
-                  </p>
-                  {ultimoProduto.promocaoAtiva &&
-                  ultimoProduto.quantidadeMinimaPromocao != null &&
-                  ultimoProduto.precoPromocional != null ? (
-                    <p className="text-xs text-amber-300">
-                      Promo ≥{ultimoProduto.quantidadeMinimaPromocao} un ·{" "}
-                      {formatCurrencyBRL(ultimoProduto.precoPromocional)}
-                    </p>
-                  ) : null}
-                </div>
-              </div>
-            ) : null}
-          </section>
-
-          <section className="min-h-0 flex-1 overflow-hidden rounded-xl border border-zinc-700 bg-zinc-950">
-            <div className="border-b border-zinc-700 px-4 py-2 text-xs font-medium tracking-wide text-zinc-400 uppercase">
-              Itens da venda
-            </div>
-            <div className="h-[calc(100%-2.25rem)] overflow-auto">
-              <table className="min-w-full text-left text-sm">
-                <thead className="sticky top-0 bg-zinc-900 text-xs text-zinc-400">
-                  <tr>
-                    <th className="px-3 py-2 font-medium">#</th>
-                    <th className="px-3 py-2 font-medium">Código</th>
-                    <th className="px-3 py-2 font-medium">Produto</th>
-                    <th className="px-3 py-2 font-medium">Qtd</th>
-                    <th className="px-3 py-2 font-medium">Unit.</th>
-                    <th className="px-3 py-2 font-medium">Total</th>
-                    <th className="px-3 py-2 font-medium" />
-                  </tr>
-                </thead>
-                <tbody>
-                  {itens.length === 0 ? (
-                    <tr>
-                      <td
-                        colSpan={7}
-                        className="px-3 py-10 text-center text-zinc-500"
-                      >
-                        Nenhum item. Bipe um produto para começar.
-                      </td>
-                    </tr>
-                  ) : (
-                    itens.map((item, index) => {
-                      const emPromo = promocaoAplicada(
-                        {
-                          promocaoAtiva: item.promocaoAtiva,
-                          quantidadeMinimaPromocao:
-                            item.quantidadeMinimaPromocao,
-                          precoPromocional: item.precoPromocional,
-                        },
-                        item.quantidade,
-                      );
-                      return (
-                        <tr
-                          key={item.lineId}
-                          className="border-t border-zinc-800 text-zinc-100"
-                        >
-                          <td className="px-3 py-2 tabular-nums text-zinc-400">
-                            {index + 1}
-                          </td>
-                          <td className="px-3 py-2 font-mono text-xs">
-                            {item.codigoBarras}
-                          </td>
-                          <td className="px-3 py-2">
-                            <div className="flex flex-col gap-0.5">
-                              <span>{item.nome}</span>
-                              {emPromo ? (
-                                <span className="w-fit rounded bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-semibold tracking-wide text-amber-300 uppercase">
-                                  Promo · a partir de{" "}
-                                  {item.quantidadeMinimaPromocao} un
-                                </span>
-                              ) : item.promocaoAtiva &&
-                                item.quantidadeMinimaPromocao != null ? (
-                                <span className="text-[10px] text-zinc-500">
-                                  Promo a partir de{" "}
-                                  {item.quantidadeMinimaPromocao} un
-                                </span>
-                              ) : null}
-                            </div>
-                          </td>
-                          <td className="px-3 py-2">
-                            <div className="flex items-center gap-1">
-                              <input
-                                type="number"
-                                min={item.unidadeVenda === "KG" ? 0.001 : 1}
-                                step={item.unidadeVenda === "KG" ? 0.001 : 1}
-                                value={item.quantidade}
-                                onChange={(e) =>
-                                  alterarQuantidade(
-                                    item.lineId,
-                                    Number(e.target.value),
-                                    item.unidadeVenda,
-                                  )
-                                }
-                                onBlur={focarInput}
-                                className="w-20 rounded border border-zinc-600 bg-zinc-900 px-2 py-1 text-center outline-none focus:ring-1 focus:ring-emerald-500"
-                              />
-                              <span className="text-xs text-zinc-500">
-                                {item.unidadeVenda === "KG" ? "kg" : "un"}
-                              </span>
-                            </div>
-                          </td>
-                          <td className="px-3 py-2 tabular-nums">
-                            {emPromo ? (
-                              <div className="flex flex-col">
-                                <span className="text-xs text-zinc-500 line-through">
-                                  {formatCurrencyBRL(item.precoNormal)}
-                                </span>
-                                <span className="font-medium text-amber-300">
-                                  {formatCurrencyBRL(item.precoUnitario)}
-                                </span>
-                              </div>
-                            ) : (
-                              <>
-                                {formatCurrencyBRL(item.precoUnitario)}
-                                {item.unidadeVenda === "KG" ? (
-                                  <span className="text-xs text-zinc-500">
-                                    /kg
-                                  </span>
-                                ) : null}
-                              </>
-                            )}
-                          </td>
-                          <td className="px-3 py-2 font-medium tabular-nums">
-                            {formatCurrencyBRL(
-                              item.quantidade * item.precoUnitario,
-                            )}
-                          </td>
-                          <td className="px-3 py-2">
-                            <button
-                              type="button"
-                              onClick={() => removerItem(item.lineId)}
-                              className="text-xs text-red-400 hover:underline"
-                            >
-                              Remover
-                            </button>
-                          </td>
-                        </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </section>
+          <PdvCartTable
+            itens={itens}
+            onAlterarQuantidade={alterarQuantidade}
+            onRemover={removerItem}
+            onBlurQuantidade={focarInput}
+          />
         </div>
 
-        <aside className="flex shrink-0 flex-col gap-4 border-t border-zinc-700 bg-zinc-950 p-4 lg:border-t-0 lg:border-l">
-          <div className="rounded-2xl bg-emerald-600 p-6 text-white shadow-lg">
-            <p className="text-sm font-medium text-emerald-100">
-              Valor total da venda
-            </p>
-            <p className="mt-2 text-4xl font-bold tracking-tight tabular-nums">
-              {formatCurrencyBRL(totalGeral)}
-            </p>
-            <p className="mt-3 text-sm text-emerald-100">
-              {itens.length} item(ns)
-            </p>
-          </div>
-
-          <button
-            type="button"
-            onClick={abrirFinalizacao}
-            disabled={!caixaOcupado || itens.length === 0 || pending}
-            className="rounded-xl bg-sky-600 py-3 text-sm font-semibold text-white hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            Finalizar venda (F4)
-          </button>
-          <button
-            type="button"
-            onClick={cancelarVenda}
-            disabled={!caixaOcupado || pending}
-            className="rounded-xl border border-red-500/50 py-3 text-sm font-semibold text-red-300 hover:bg-red-950/40 disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            Cancelar venda (F8)
-          </button>
-
-          <div className="rounded-xl border border-zinc-700 p-4 text-xs text-zinc-400">
-            <p className="font-medium text-zinc-300">Atalhos</p>
-            <ul className="mt-2 space-y-1">
-              <li>
-                <kbd className="text-zinc-200">F2</kbd> — Nova venda
-              </li>
-              <li>
-                <kbd className="text-zinc-200">F4</kbd> — Finalizar
-              </li>
-              <li>
-                <kbd className="text-zinc-200">F8</kbd> — Cancelar venda
-              </li>
-              <li>
-                <kbd className="text-zinc-200">Enter</kbd> — Confirmar código
-              </li>
-              <li>
-                <kbd className="text-zinc-200">3*codigo</kbd> — Qtd × produto
-              </li>
-              <li>Produtos por kg pedem o peso ao bipar</li>
-              <li>
-                <kbd className="text-zinc-200">Esc</kbd> — Limpar busca
-              </li>
-            </ul>
-          </div>
-        </aside>
+        <PdvSidebar
+          totalGeral={totalGeral}
+          qtdItens={itens.length}
+          caixaOcupado={caixaOcupado}
+          pending={pending}
+          onFinalizar={abrirFinalizacao}
+          onCancelar={cancelarVenda}
+        />
       </div>
 
       {pesoPendente ? (
