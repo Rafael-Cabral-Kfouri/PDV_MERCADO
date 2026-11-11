@@ -2,6 +2,7 @@
 
 import { Fragment, useMemo, useState, useTransition } from "react";
 import type { PaymentMethod } from "@prisma/client";
+import { cancelarVendaAction } from "@/lib/actions/sale";
 import {
   obterRelatorioVendas,
   type OperadorOption,
@@ -99,6 +100,9 @@ export function SalesReportPanel({
   const [relatorio, setRelatorio] = useState(initialRelatorio);
   const [erro, setErro] = useState<string | null>(null);
   const [vendaAbertaId, setVendaAbertaId] = useState<string | null>(null);
+  const [cancelandoId, setCancelandoId] = useState<string | null>(null);
+  const [motivoCancelamento, setMotivoCancelamento] = useState("");
+  const [feedbackCancel, setFeedbackCancel] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
   const anos = useMemo(() => {
@@ -140,6 +144,45 @@ export function SalesReportPanel({
    */
   function toggleVenda(id: string) {
     setVendaAbertaId((atual) => (atual === id ? null : id));
+  }
+
+  /**
+   * Abre o modal de confirmação de cancelamento para a venda.
+   *
+   * @param id - Id da venda concluída.
+   */
+  function abrirCancelamento(id: string) {
+    setCancelandoId(id);
+    setMotivoCancelamento("");
+    setFeedbackCancel(null);
+  }
+
+  /**
+   * Confirma o cancelamento com o motivo informado e recarrega o relatório.
+   */
+  function confirmarCancelamento() {
+    if (!cancelandoId) return;
+    setFeedbackCancel(null);
+    startTransition(async () => {
+      const result = await cancelarVendaAction(
+        cancelandoId,
+        motivoCancelamento,
+      );
+      if (!result.ok) {
+        setFeedbackCancel(result.message);
+        return;
+      }
+      setCancelandoId(null);
+      setMotivoCancelamento("");
+      try {
+        const data = await obterRelatorioVendas(toFiltros(filters));
+        setRelatorio(data);
+      } catch (e) {
+        setErro(
+          e instanceof Error ? e.message : "Erro ao recarregar o relatório.",
+        );
+      }
+    });
   }
 
   return (
@@ -359,12 +402,15 @@ export function SalesReportPanel({
                   <th className="px-4 py-2 font-medium">Data</th>
                   <th className="px-4 py-2 font-medium">Operador</th>
                   <th className="px-4 py-2 font-medium">Pagamento</th>
+                  <th className="px-4 py-2 font-medium">Status</th>
                   <th className="px-4 py-2 font-medium text-right">Total</th>
+                  <th className="px-4 py-2 font-medium text-right">Ações</th>
                 </tr>
               </thead>
               <tbody>
                 {relatorio.vendas.map((venda) => {
                   const aberta = vendaAbertaId === venda.id;
+                  const cancelada = venda.status === "CANCELADA";
                   return (
                     <Fragment key={venda.id}>
                       <tr
@@ -394,13 +440,44 @@ export function SalesReportPanel({
                             ? FORMA_LABEL[venda.formaPagamento]
                             : "—"}
                         </td>
+                        <td className="px-4 py-2.5">
+                          {cancelada ? (
+                            <span className="inline-flex rounded bg-red-100 px-2 py-0.5 text-xs font-medium text-red-800">
+                              Cancelada
+                            </span>
+                          ) : (
+                            <span className="inline-flex rounded bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-800">
+                              Concluída
+                            </span>
+                          )}
+                        </td>
                         <td className="px-4 py-2.5 text-right font-medium text-zinc-900">
                           {formatCurrencyBRL(venda.total)}
+                        </td>
+                        <td className="px-4 py-2.5 text-right">
+                          {!cancelada ? (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                abrirCancelamento(venda.id);
+                              }}
+                              className="rounded border border-red-200 px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-50"
+                            >
+                              Cancelar venda
+                            </button>
+                          ) : null}
                         </td>
                       </tr>
                       {aberta ? (
                         <tr className="bg-zinc-50">
-                          <td colSpan={5} className="px-4 py-3">
+                          <td colSpan={7} className="px-4 py-3">
+                            {cancelada && venda.motivoCancelamento ? (
+                              <p className="mb-2 text-sm text-red-700">
+                                Motivo do cancelamento:{" "}
+                                {venda.motivoCancelamento}
+                              </p>
+                            ) : null}
                             <table className="min-w-full text-sm">
                               <thead>
                                 <tr className="text-xs text-zinc-500">
@@ -454,6 +531,59 @@ export function SalesReportPanel({
           </div>
         )}
       </section>
+
+      {cancelandoId ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="cancelar-venda-titulo"
+        >
+          <div className="w-full max-w-md rounded-xl bg-white p-5 shadow-xl">
+            <h3
+              id="cancelar-venda-titulo"
+              className="text-base font-semibold text-zinc-900"
+            >
+              Cancelar venda
+            </h3>
+            <p className="mt-1 text-sm text-zinc-600">
+              O estoque dos itens será devolvido. Informe o motivo (mínimo 5
+              caracteres).
+            </p>
+            <label className="mt-3 block text-sm text-zinc-700">
+              Motivo
+              <textarea
+                value={motivoCancelamento}
+                onChange={(e) => setMotivoCancelamento(e.target.value)}
+                rows={3}
+                className="mt-1 w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm outline-none ring-emerald-500 focus:ring-2"
+                placeholder="Ex.: cliente desistiu / bipagem incorreta"
+              />
+            </label>
+            {feedbackCancel ? (
+              <p className="mt-2 text-sm text-red-600">{feedbackCancel}</p>
+            ) : null}
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setCancelandoId(null)}
+                disabled={pending}
+                className="rounded-lg border border-zinc-300 px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
+              >
+                Voltar
+              </button>
+              <button
+                type="button"
+                onClick={confirmarCancelamento}
+                disabled={pending}
+                className="rounded-lg bg-red-700 px-3 py-2 text-sm font-medium text-white hover:bg-red-800 disabled:opacity-60"
+              >
+                {pending ? "Cancelando…" : "Confirmar cancelamento"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       <section className="overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-sm">
         <div className="border-b border-zinc-200 px-4 py-3">

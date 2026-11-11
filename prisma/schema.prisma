@@ -1,5 +1,5 @@
 // Schema do PDV Mercado — Prompt 1
-// Models: User, Product, Sale, SaleItem
+// Models: User, Product, Sale, SaleItem, AuditLog, StoreSettings
 
 generator client {
   provider = "prisma-client-js"
@@ -34,17 +34,19 @@ enum UnidadeVenda {
 }
 
 model User {
-  id        String   @id @default(cuid())
-  nome      String
-  email     String   @unique
-  senhaHash String
-  funcao    Role
-  cpf       String?  @unique
-  rg        String?
-  telefone  String?
-  endereco  String?
-  vendas    Sale[]
-  criadoEm  DateTime @default(now())
+  id               String     @id @default(cuid())
+  nome             String
+  email            String     @unique
+  senhaHash        String
+  funcao           Role
+  cpf              String?    @unique
+  rg               String?
+  telefone         String?
+  endereco         String?
+  vendas           Sale[]     @relation("SaleOperador")
+  vendasCanceladas Sale[]     @relation("SaleCancelador")
+  auditLogs        AuditLog[]
+  criadoEm         DateTime   @default(now())
 }
 
 model Product {
@@ -71,15 +73,19 @@ model Product {
 }
 
 model Sale {
-  id             String         @id @default(cuid())
-  codigoVenda    String         @unique
-  dataVenda      DateTime       @default(now())
-  total          Decimal        @db.Decimal(12, 2)
-  formaPagamento PaymentMethod?
-  status         SaleStatus     @default(CONCLUIDA)
-  operadorId     String
-  operador       User           @relation(fields: [operadorId], references: [id])
-  itens          SaleItem[]
+  id                 String         @id @default(cuid())
+  codigoVenda        String         @unique
+  dataVenda          DateTime       @default(now())
+  total              Decimal        @db.Decimal(12, 2)
+  formaPagamento     PaymentMethod?
+  status             SaleStatus     @default(CONCLUIDA)
+  operadorId         String
+  operador           User           @relation("SaleOperador", fields: [operadorId], references: [id])
+  canceladoEm        DateTime?
+  canceladoPorId     String?
+  canceladoPor       User?          @relation("SaleCancelador", fields: [canceladoPorId], references: [id])
+  motivoCancelamento String?
+  itens              SaleItem[]
 }
 
 model SaleItem {
@@ -92,6 +98,22 @@ model SaleItem {
   precoTotal    Decimal @db.Decimal(12, 2)
   venda         Sale    @relation(fields: [vendaId], references: [id], onDelete: Cascade)
   produto       Product @relation(fields: [produtoId], references: [id])
+}
+
+/// Registro de auditoria de ações administrativas sensíveis.
+model AuditLog {
+  id         String   @id @default(cuid())
+  usuarioId  String
+  usuario    User     @relation(fields: [usuarioId], references: [id])
+  /// Ex.: PRODUTO_PRECO_ALTERADO, ESTOQUE_AJUSTADO, VENDA_CANCELADA, …
+  acao       String
+  entidade   String
+  entidadeId String?
+  detalhes   Json?
+  criadoEm   DateTime @default(now())
+
+  @@index([entidade, entidadeId])
+  @@index([criadoEm])
 }
 
 /// Configuração única do estabelecimento (recibo / impressão).

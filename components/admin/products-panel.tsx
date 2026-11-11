@@ -8,62 +8,19 @@ import {
   salvarProdutoAction,
   type ActionResult,
 } from "@/lib/actions/products";
-import { formatCurrencyBRL, formatQuantidade, maskCurrencyInput } from "@/lib/format";
-import {
-  formatDateInputValue,
-  formatValidadePtBR,
-  isAlertaProdutoVencido,
-  mensagemAlertaValidade,
-  parseDateInputValue,
-} from "@/lib/validade-produto";
+import { formatCurrencyBRL } from "@/lib/format";
+import { formatDateInputValue } from "@/lib/validade-produto";
 import { NfeImportPanel } from "@/components/admin/nfe-import-panel";
-import { BarcodeInput } from "@/components/ui/barcode-input";
+import { ProductForm } from "@/components/admin/product-form";
+import { ProductList } from "@/components/admin/product-list";
+import {
+  emptyProductForm,
+  type ProductFormState,
+  type ProductRow,
+} from "@/components/admin/product-types";
 import { useToast } from "@/components/ui/toast";
-import type { UnidadeVenda } from "@prisma/client";
 
-export type ProductRow = {
-  id: string;
-  nome: string;
-  codigoBarras: string;
-  precoUnitario: string;
-  quantidadeEstoque: number;
-  unidadeVenda: UnidadeVenda;
-  fotoUrl: string | null;
-  dataValidade: string | null;
-  promocaoAtiva: boolean;
-  quantidadeMinimaPromocao: number | null;
-  precoPromocional: string | null;
-};
-
-type FormState = {
-  id: string;
-  nome: string;
-  codigoBarras: string;
-  precoUnitario: string;
-  quantidadeEstoque: string;
-  unidadeVenda: UnidadeVenda;
-  dataValidade: string;
-  fotoUrl: string | null;
-  removerFoto: boolean;
-  promocaoAtiva: boolean;
-  quantidadeMinimaPromocao: string;
-  precoPromocional: string;
-};
-
-const emptyForm: FormState = {
-  id: "",
-  nome: "",
-  codigoBarras: "",
-  precoUnitario: "",
-  quantidadeEstoque: "0",
-  unidadeVenda: "UNIDADE",
-  dataValidade: "",
-  fotoUrl: null,
-  removerFoto: false,
-  promocaoAtiva: false,
-  quantidadeMinimaPromocao: "",
-  precoPromocional: "",
-};
+export type { ProductRow };
 
 /**
  * Painel de cadastro, busca, edição e exclusão de produtos
@@ -74,7 +31,7 @@ const emptyForm: FormState = {
 export function ProductsPanel({ produtos }: { produtos: ProductRow[] }) {
   const router = useRouter();
   const { toast } = useToast();
-  const [form, setForm] = useState<FormState>(emptyForm);
+  const [form, setForm] = useState<ProductFormState>(emptyProductForm);
   const [previewLocal, setPreviewLocal] = useState<string | null>(null);
   const [busca, setBusca] = useState("");
   const [pending, startTransition] = useTransition();
@@ -103,7 +60,7 @@ export function ProductsPanel({ produtos }: { produtos: ProductRow[] }) {
    * Limpa o formulário e devolve o foco ao campo de código de barras.
    */
   function limparCampos() {
-    setForm(emptyForm);
+    setForm(emptyProductForm);
     setPreviewLocal(null);
     if (fotoRef.current) fotoRef.current.value = "";
     codigoRef.current?.focus();
@@ -191,495 +148,46 @@ export function ProductsPanel({ produtos }: { produtos: ProductRow[] }) {
     });
   }
 
+  /**
+   * Atualiza a prévia local ao escolher um arquivo de foto.
+   *
+   * @param file - Arquivo selecionado ou undefined se limpo.
+   */
+  function onFotoChange(file: File | undefined) {
+    if (file) {
+      setPreviewLocal(URL.createObjectURL(file));
+      setForm((p) => ({ ...p, removerFoto: false }));
+    } else {
+      setPreviewLocal(null);
+    }
+  }
+
   return (
     <div className="flex flex-col gap-8">
       <NfeImportPanel />
 
-      <section className="rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">
-        <h2 className="text-lg font-semibold text-zinc-900">
-          {form.id ? "Editar produto" : "Cadastrar produto"}
-        </h2>
-        <p className="mt-1 text-sm text-zinc-500">
-          Bipe o código de barras ou digite manualmente. Foto opcional (JPG/PNG/WebP, máx. 2 MB).
-        </p>
+      <ProductForm
+        form={form}
+        setForm={setForm}
+        previewSrc={previewSrc}
+        temPreviewLocal={previewLocal !== null}
+        pending={pending}
+        codigoRef={codigoRef}
+        fotoRef={fotoRef}
+        onSubmit={onSubmit}
+        onLimpar={limparCampos}
+        onGerarCodigoInterno={gerarCodigoInterno}
+        onFotoChange={onFotoChange}
+      />
 
-        <form
-          onSubmit={onSubmit}
-          encType="multipart/form-data"
-          className="mt-6 grid gap-4 sm:grid-cols-2"
-        >
-          <input type="hidden" name="id" value={form.id} />
-
-          <div className="sm:col-span-2 flex flex-col gap-1.5">
-            <label
-              htmlFor="codigoBarras"
-              className="text-sm font-medium text-zinc-700"
-            >
-              Código de barras
-            </label>
-            <div className="flex flex-col gap-2 sm:flex-row">
-              <BarcodeInput
-                ref={codigoRef}
-                id="codigoBarras"
-                name="codigoBarras"
-                required
-                inputMode="numeric"
-                value={form.codigoBarras}
-                onValueChange={(codigoBarras) =>
-                  setForm((p) => ({ ...p, codigoBarras }))
-                }
-                onConfirm={(codigo) => {
-                  setForm((p) => ({ ...p, codigoBarras: codigo }));
-                  window.requestAnimationFrame(() => {
-                    (
-                      document.getElementById(
-                        "nome",
-                      ) as HTMLInputElement | null
-                    )?.focus();
-                  });
-                }}
-                placeholder="Bipe ou digite o código"
-                className="flex-1 rounded-lg border border-zinc-300 px-3 py-2 font-mono outline-none ring-emerald-600 focus:ring-2"
-              />
-              <button
-                type="button"
-                onClick={gerarCodigoInterno}
-                disabled={pending}
-                className="rounded-lg border border-emerald-700 px-3 py-2 text-sm font-medium text-emerald-800 hover:bg-emerald-50 disabled:opacity-60"
-              >
-                Gerar código interno
-              </button>
-            </div>
-            <p className="text-xs text-zinc-500">
-              Pode bipar mesmo sem clicar no campo. O código preenche sozinho.
-            </p>
-          </div>
-
-          <div className="sm:col-span-2 flex flex-col gap-1.5">
-            <label htmlFor="nome" className="text-sm font-medium text-zinc-700">
-              Nome do produto
-            </label>
-            <input
-              id="nome"
-              name="nome"
-              required
-              value={form.nome}
-              onChange={(e) => setForm((p) => ({ ...p, nome: e.target.value }))}
-              className="rounded-lg border border-zinc-300 px-3 py-2 outline-none ring-emerald-600 focus:ring-2"
-            />
-          </div>
-
-          <div className="sm:col-span-2 flex flex-col gap-1.5">
-            <span className="text-sm font-medium text-zinc-700">
-              Cobrado por
-            </span>
-            <div className="flex flex-wrap gap-4">
-              <label className="flex items-center gap-2 text-sm text-zinc-700">
-                <input
-                  type="radio"
-                  name="unidadeVenda"
-                  value="UNIDADE"
-                  checked={form.unidadeVenda === "UNIDADE"}
-                  onChange={() =>
-                    setForm((p) => ({ ...p, unidadeVenda: "UNIDADE" }))
-                  }
-                  className="accent-emerald-700"
-                />
-                Unidade
-              </label>
-              <label className="flex items-center gap-2 text-sm text-zinc-700">
-                <input
-                  type="radio"
-                  name="unidadeVenda"
-                  value="KG"
-                  checked={form.unidadeVenda === "KG"}
-                  onChange={() =>
-                    setForm((p) => ({
-                      ...p,
-                      unidadeVenda: "KG",
-                      promocaoAtiva: false,
-                    }))
-                  }
-                  className="accent-emerald-700"
-                />
-                Quilo (kg)
-              </label>
-            </div>
-            <p className="text-xs text-zinc-500">
-              Produtos por kg pedem o peso no caixa (balança externa).
-            </p>
-          </div>
-
-          <div className="flex flex-col gap-1.5">
-            <label
-              htmlFor="precoUnitario"
-              className="text-sm font-medium text-zinc-700"
-            >
-              {form.unidadeVenda === "KG" ? "Preço por kg" : "Preço unitário"}
-            </label>
-            <input
-              id="precoUnitario"
-              name="precoUnitario"
-              required
-              inputMode="numeric"
-              value={form.precoUnitario}
-              onChange={(e) =>
-                setForm((p) => ({
-                  ...p,
-                  precoUnitario: maskCurrencyInput(e.target.value),
-                }))
-              }
-              placeholder="R$ 0,00"
-              className="rounded-lg border border-zinc-300 px-3 py-2 outline-none ring-emerald-600 focus:ring-2"
-            />
-          </div>
-
-          <div className="flex flex-col gap-1.5">
-            <label
-              htmlFor="quantidadeEstoque"
-              className="text-sm font-medium text-zinc-700"
-            >
-              {form.unidadeVenda === "KG"
-                ? "Estoque (kg)"
-                : "Quantidade em estoque"}
-            </label>
-            <input
-              id="quantidadeEstoque"
-              name="quantidadeEstoque"
-              type="text"
-              inputMode="decimal"
-              required
-              value={form.quantidadeEstoque}
-              onChange={(e) =>
-                setForm((p) => ({ ...p, quantidadeEstoque: e.target.value }))
-              }
-              placeholder={form.unidadeVenda === "KG" ? "Ex.: 12,500" : "0"}
-              className="rounded-lg border border-zinc-300 px-3 py-2 outline-none ring-emerald-600 focus:ring-2"
-            />
-          </div>
-
-          <div className="flex flex-col gap-1.5">
-            <label
-              htmlFor="dataValidade"
-              className="text-sm font-medium text-zinc-700"
-            >
-              Data de validade
-            </label>
-            <input
-              id="dataValidade"
-              name="dataValidade"
-              type="date"
-              value={form.dataValidade}
-              onChange={(e) =>
-                setForm((p) => ({ ...p, dataValidade: e.target.value }))
-              }
-              className="rounded-lg border border-zinc-300 px-3 py-2 outline-none ring-emerald-600 focus:ring-2"
-            />
-            <p className="text-xs text-zinc-500">
-              Opcional. Alertas aparecem a partir de 6 meses do vencimento.
-            </p>
-          </div>
-
-          <div className="sm:col-span-2 rounded-lg border border-zinc-200 bg-zinc-50 p-4">
-            <label className="flex items-center gap-2 text-sm font-medium text-zinc-800">
-              <input
-                type="checkbox"
-                name="promocaoAtiva"
-                checked={form.promocaoAtiva}
-                disabled={form.unidadeVenda === "KG"}
-                onChange={(e) =>
-                  setForm((p) => ({ ...p, promocaoAtiva: e.target.checked }))
-                }
-                className="accent-emerald-700"
-              />
-              Promoção por quantidade
-            </label>
-            <p className="mt-1 text-xs text-zinc-500">
-              {form.unidadeVenda === "KG"
-                ? "Disponível apenas para produtos cobrados por unidade."
-                : "Ao atingir a quantidade mínima no caixa, o preço unitário passa a ser o promocional."}
-            </p>
-            {form.promocaoAtiva && form.unidadeVenda === "UNIDADE" ? (
-              <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                <div className="flex flex-col gap-1.5">
-                  <label
-                    htmlFor="quantidadeMinimaPromocao"
-                    className="text-sm font-medium text-zinc-700"
-                  >
-                    Quantidade mínima
-                  </label>
-                  <input
-                    id="quantidadeMinimaPromocao"
-                    name="quantidadeMinimaPromocao"
-                    type="number"
-                    min={2}
-                    step={1}
-                    required
-                    value={form.quantidadeMinimaPromocao}
-                    onChange={(e) =>
-                      setForm((p) => ({
-                        ...p,
-                        quantidadeMinimaPromocao: e.target.value,
-                      }))
-                    }
-                    placeholder="Ex.: 3"
-                    className="rounded-lg border border-zinc-300 bg-white px-3 py-2 outline-none ring-emerald-600 focus:ring-2"
-                  />
-                </div>
-                <div className="flex flex-col gap-1.5">
-                  <label
-                    htmlFor="precoPromocional"
-                    className="text-sm font-medium text-zinc-700"
-                  >
-                    Preço promocional
-                  </label>
-                  <input
-                    id="precoPromocional"
-                    name="precoPromocional"
-                    required
-                    inputMode="numeric"
-                    value={form.precoPromocional}
-                    onChange={(e) =>
-                      setForm((p) => ({
-                        ...p,
-                        precoPromocional: maskCurrencyInput(e.target.value),
-                      }))
-                    }
-                    placeholder="R$ 0,00"
-                    className="rounded-lg border border-zinc-300 bg-white px-3 py-2 outline-none ring-emerald-600 focus:ring-2"
-                  />
-                </div>
-              </div>
-            ) : null}
-          </div>
-
-          <div className="sm:col-span-2 flex flex-col gap-3 sm:flex-row sm:items-start">
-            <div className="flex flex-1 flex-col gap-1.5">
-              <label htmlFor="foto" className="text-sm font-medium text-zinc-700">
-                Foto do produto (opcional)
-              </label>
-              <input
-                ref={fotoRef}
-                id="foto"
-                name="foto"
-                type="file"
-                accept="image/jpeg,image/png,image/webp"
-                onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  if (file) {
-                    setPreviewLocal(URL.createObjectURL(file));
-                    setForm((p) => ({ ...p, removerFoto: false }));
-                  } else {
-                    setPreviewLocal(null);
-                  }
-                }}
-                className="block w-full text-sm text-zinc-600 file:mr-3 file:rounded-lg file:border-0 file:bg-emerald-50 file:px-3 file:py-2 file:text-sm file:font-medium file:text-emerald-800"
-              />
-              {form.fotoUrl && !previewLocal ? (
-                <label className="mt-1 flex items-center gap-2 text-sm text-zinc-600">
-                  <input
-                    type="checkbox"
-                    name="removerFoto"
-                    checked={form.removerFoto}
-                    onChange={(e) =>
-                      setForm((p) => ({ ...p, removerFoto: e.target.checked }))
-                    }
-                    className="accent-emerald-700"
-                  />
-                  Remover foto atual
-                </label>
-              ) : null}
-            </div>
-            {previewSrc ? (
-              <div className="relative h-24 w-24 overflow-hidden rounded-lg border border-zinc-200 bg-zinc-50">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={previewSrc}
-                  alt="Prévia"
-                  className="h-full w-full object-cover"
-                />
-              </div>
-            ) : (
-              <div className="flex h-24 w-24 items-center justify-center rounded-lg border border-dashed border-zinc-300 text-xs text-zinc-400">
-                Sem foto
-              </div>
-            )}
-          </div>
-
-          <div className="sm:col-span-2 flex flex-wrap gap-3 pt-2">
-            <button
-              type="submit"
-              disabled={pending}
-              className="rounded-lg bg-emerald-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-800 disabled:opacity-60"
-            >
-              {pending ? "Salvando…" : form.id ? "Atualizar" : "Salvar"}
-            </button>
-            <button
-              type="button"
-              onClick={limparCampos}
-              disabled={pending}
-              className="rounded-lg border border-zinc-300 px-4 py-2.5 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
-            >
-              Limpar campos
-            </button>
-          </div>
-        </form>
-      </section>
-
-      <section className="rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-          <div>
-            <h2 className="text-lg font-semibold text-zinc-900">
-              Listagem de produtos
-            </h2>
-            <p className="mt-1 text-sm text-zinc-500">
-              {filtrados.length} produto(s)
-            </p>
-          </div>
-          <div className="flex w-full flex-col gap-1.5 sm:max-w-xs">
-            <label htmlFor="busca" className="text-sm font-medium text-zinc-700">
-              Busca rápida
-            </label>
-            <input
-              id="busca"
-              value={busca}
-              onChange={(e) => setBusca(e.target.value)}
-              placeholder="Nome ou código de barras"
-              className="rounded-lg border border-zinc-300 px-3 py-2 outline-none ring-emerald-600 focus:ring-2"
-            />
-          </div>
-        </div>
-
-        <div className="mt-4 overflow-x-auto">
-          <table className="min-w-full text-left text-sm">
-            <thead className="border-b border-zinc-200 text-zinc-500">
-              <tr>
-                <th className="px-2 py-2 font-medium">Foto</th>
-                <th className="px-2 py-2 font-medium">Nome</th>
-                <th className="px-2 py-2 font-medium">Código</th>
-                <th className="px-2 py-2 font-medium">Cobrança</th>
-                <th className="px-2 py-2 font-medium">Preço</th>
-                <th className="px-2 py-2 font-medium">Promoção</th>
-                <th className="px-2 py-2 font-medium">Estoque</th>
-                <th className="px-2 py-2 font-medium">Validade</th>
-                <th className="px-2 py-2 font-medium">Ações</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtrados.length === 0 ? (
-                <tr>
-                  <td colSpan={9} className="px-2 py-6 text-center text-zinc-500">
-                    Nenhum produto encontrado.
-                  </td>
-                </tr>
-              ) : (
-                filtrados.map((produto) => {
-                  const alerta = mensagemAlertaValidade(
-                    parseDateInputValue(produto.dataValidade),
-                  );
-                  const vencido = isAlertaProdutoVencido(alerta);
-
-                  return (
-                    <tr
-                      key={produto.id}
-                      className="border-b border-zinc-100 text-zinc-800"
-                    >
-                      <td className="px-2 py-3">
-                        {produto.fotoUrl ? (
-                          // eslint-disable-next-line @next/next/no-img-element -- uploads dinâmicos em /public
-                          <img
-                            src={produto.fotoUrl}
-                            alt={produto.nome}
-                            width={40}
-                            height={40}
-                            className="h-10 w-10 rounded object-cover"
-                          />
-                        ) : (
-                          <span className="flex h-10 w-10 items-center justify-center rounded bg-zinc-100 text-[10px] text-zinc-400">
-                            —
-                          </span>
-                        )}
-                      </td>
-                      <td className="px-2 py-3">{produto.nome}</td>
-                      <td className="px-2 py-3 font-mono text-xs">
-                        {produto.codigoBarras}
-                      </td>
-                      <td className="px-2 py-3">
-                        {produto.unidadeVenda === "KG" ? "kg" : "un"}
-                      </td>
-                      <td className="px-2 py-3">
-                        {formatCurrencyBRL(Number(produto.precoUnitario))}
-                        {produto.unidadeVenda === "KG" ? "/kg" : ""}
-                      </td>
-                      <td className="px-2 py-3">
-                        {produto.promocaoAtiva &&
-                        produto.quantidadeMinimaPromocao != null &&
-                        produto.precoPromocional != null ? (
-                          <span className="text-xs text-emerald-800">
-                            ≥{produto.quantidadeMinimaPromocao} un →{" "}
-                            {formatCurrencyBRL(
-                              Number(produto.precoPromocional),
-                            )}
-                          </span>
-                        ) : (
-                          <span className="text-zinc-400">—</span>
-                        )}
-                      </td>
-                      <td className="px-2 py-3">
-                        {formatQuantidade(
-                          Number(produto.quantidadeEstoque),
-                          produto.unidadeVenda,
-                        )}
-                      </td>
-                      <td className="px-2 py-3">
-                        {produto.dataValidade ? (
-                          <div className="flex flex-col gap-0.5">
-                            <span>{formatValidadePtBR(produto.dataValidade)}</span>
-                            {alerta ? (
-                              <span
-                                className={
-                                  vencido
-                                    ? "text-xs font-semibold text-red-700"
-                                    : "text-xs font-medium text-amber-700"
-                                }
-                              >
-                                {alerta}
-                              </span>
-                            ) : null}
-                          </div>
-                        ) : (
-                          <span className="text-zinc-400">—</span>
-                        )}
-                      </td>
-                      <td className="px-2 py-3">
-                        <div className="flex gap-2">
-                          <button
-                            type="button"
-                            onClick={() => editarProduto(produto)}
-                            className="text-emerald-700 hover:underline"
-                          >
-                            Editar
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              excluirProduto(produto.id, produto.nome)
-                            }
-                            className="text-red-600 hover:underline"
-                            disabled={pending}
-                          >
-                            Excluir
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
-      </section>
+      <ProductList
+        produtos={filtrados}
+        busca={busca}
+        onBuscaChange={setBusca}
+        pending={pending}
+        onEditar={editarProduto}
+        onExcluir={excluirProduto}
+      />
     </div>
   );
 }

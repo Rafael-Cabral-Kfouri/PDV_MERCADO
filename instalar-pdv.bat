@@ -88,6 +88,9 @@ echo.
 echo  Login padrao:
 echo    admin@pdv.local / admin123
 echo    operador@pdv.local / operador123
+echo.
+echo  [AVISO] Troque as senhas padrao assim que possivel
+echo          ^(admin - Funcionarios, ou via SEED_* no .env antes do seed^).
 echo ========================================
 pause
 endlocal

@@ -3,13 +3,33 @@ import { PrismaClient, Role } from "@prisma/client";
 
 const prisma = new PrismaClient();
 
+const SENHA_ADMIN_PADRAO = "admin123";
+const SENHA_OPERADOR_PADRAO = "operador123";
+
 /**
  * Popula usuários iniciais para desenvolvimento e testes de login/RBAC.
+ * Senhas: `SEED_ADMIN_PASSWORD` / `SEED_OPERADOR_PASSWORD` ou padrões com aviso.
  * Admin → /admin/dashboard | Operador → /pdv
  */
 async function main() {
-  const senhaAdmin = await hash("admin123", 10);
-  const senhaOperador = await hash("operador123", 10);
+  const senhaAdminPlain =
+    process.env.SEED_ADMIN_PASSWORD?.trim() || SENHA_ADMIN_PADRAO;
+  const senhaOperadorPlain =
+    process.env.SEED_OPERADOR_PASSWORD?.trim() || SENHA_OPERADOR_PADRAO;
+
+  if (!process.env.SEED_ADMIN_PASSWORD?.trim()) {
+    console.warn(
+      `[AVISO] SEED_ADMIN_PASSWORD nao definida; usando senha padrao "${SENHA_ADMIN_PADRAO}". Troque em producao.`,
+    );
+  }
+  if (!process.env.SEED_OPERADOR_PASSWORD?.trim()) {
+    console.warn(
+      `[AVISO] SEED_OPERADOR_PASSWORD nao definida; usando senha padrao "${SENHA_OPERADOR_PADRAO}". Troque em producao.`,
+    );
+  }
+
+  const senhaAdmin = await hash(senhaAdminPlain, 10);
+  const senhaOperador = await hash(senhaOperadorPlain, 10);
 
   await prisma.user.upsert({
     where: { email: "admin@pdv.local" },
@@ -44,8 +64,8 @@ async function main() {
   });
 
   console.log("Seed OK:");
-  console.log("  admin@pdv.local / admin123 (ADMIN)");
-  console.log("  operador@pdv.local / operador123 (CASHIER)");
+  console.log(`  admin@pdv.local / ${senhaAdminPlain} (ADMIN)`);
+  console.log(`  operador@pdv.local / ${senhaOperadorPlain} (CASHIER)`);
 }
 
 main()

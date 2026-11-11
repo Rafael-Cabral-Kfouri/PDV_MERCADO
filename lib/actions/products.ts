@@ -3,6 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { Prisma, UnidadeVenda } from "@prisma/client";
 import { requireAdmin } from "@/lib/auth-guards";
+import { registrarAuditoria } from "@/lib/audit";
+import { mensagemDeErro } from "@/lib/errors";
 import { parseCurrencyBRL, parseDecimalBR } from "@/lib/format";
 import { prisma } from "@/lib/prisma";
 import { removerFotoProduto, salvarFotoProduto } from "@/lib/product-image";
@@ -43,7 +45,7 @@ export async function gerarCodigoInternoAction(): Promise<ActionResult> {
   } catch (error) {
     return {
       ok: false,
-      message: error instanceof Error ? error.message : "Erro ao gerar código.",
+      message: mensagemDeErro(error, "Erro ao gerar código."),
     };
   }
 }
@@ -72,7 +74,7 @@ export async function salvarProdutoAction(
   formData: FormData,
 ): Promise<ActionResult> {
   try {
-    await requireAdmin();
+    const session = await requireAdmin();
 
     const id = String(formData.get("id") ?? "").trim() || null;
     const nome = String(formData.get("nome") ?? "").trim();
@@ -223,7 +225,44 @@ export async function salvarProdutoAction(
         data.fotoUrl = null;
       }
 
-      await prisma.product.update({ where: { id }, data });
+      const precoAntigo = Number(atual.precoUnitario);
+      const estoqueAntigo = Number(atual.quantidadeEstoque);
+      const precoNovo = Number(data.precoUnitario);
+      const estoqueNovo = Number(data.quantidadeEstoque);
+
+      await prisma.$transaction(async (tx) => {
+        await tx.product.update({ where: { id }, data });
+
+        if (precoAntigo !== precoNovo) {
+          await registrarAuditoria(tx, {
+            usuarioId: session.user.id,
+            acao: "PRODUTO_PRECO_ALTERADO",
+            entidade: "Product",
+            entidadeId: id,
+            detalhes: {
+              codigoBarras: atual.codigoBarras,
+              nome: atual.nome,
+              precoAntigo,
+              precoNovo,
+            },
+          });
+        }
+        if (estoqueAntigo !== estoqueNovo) {
+          await registrarAuditoria(tx, {
+            usuarioId: session.user.id,
+            acao: "ESTOQUE_AJUSTADO",
+            entidade: "Product",
+            entidadeId: id,
+            detalhes: {
+              codigoBarras: atual.codigoBarras,
+              nome: atual.nome,
+              estoqueAntigo,
+              estoqueNovo,
+            },
+          });
+        }
+      });
+
       revalidatePath("/admin/produtos");
       revalidatePath("/pdv");
       return { ok: true, message: "Produto atualizado com sucesso." };
@@ -246,7 +285,7 @@ export async function salvarProdutoAction(
     }
     return {
       ok: false,
-      message: error instanceof Error ? error.message : "Erro ao salvar produto.",
+      message: mensagemDeErro(error, "Erro ao salvar produto."),
     };
   }
 }
@@ -259,13 +298,25 @@ export async function salvarProdutoAction(
  */
 export async function excluirProdutoAction(id: string): Promise<ActionResult> {
   try {
-    await requireAdmin();
+    const session = await requireAdmin();
     if (!id) return { ok: false, message: "Produto inválido." };
 
     const produto = await prisma.product.findUnique({ where: { id } });
     if (!produto) return { ok: false, message: "Produto não encontrado." };
 
-    await prisma.product.delete({ where: { id } });
+    await prisma.$transaction(async (tx) => {
+      await tx.product.delete({ where: { id } });
+      await registrarAuditoria(tx, {
+        usuarioId: session.user.id,
+        acao: "PRODUTO_EXCLUIDO",
+        entidade: "Product",
+        entidadeId: id,
+        detalhes: {
+          codigoBarras: produto.codigoBarras,
+          nome: produto.nome,
+        },
+      });
+    });
     await removerFotoProduto(produto.fotoUrl);
     revalidatePath("/admin/produtos");
     revalidatePath("/pdv");
@@ -282,7 +333,7 @@ export async function excluirProdutoAction(id: string): Promise<ActionResult> {
     }
     return {
       ok: false,
-      message: error instanceof Error ? error.message : "Erro ao excluir produto.",
+      message: mensagemDeErro(error, "Erro ao excluir produto."),
     };
   }
 }

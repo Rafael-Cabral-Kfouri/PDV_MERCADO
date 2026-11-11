@@ -1,8 +1,14 @@
 "use server";
 
 import { Prisma, PaymentMethod, SaleStatus, UnidadeVenda } from "@prisma/client";
-import { requireAuth } from "@/lib/auth-guards";
-import { precoEfetivo } from "@/lib/pdv-utils";
+import { requireAdmin, requireAuth } from "@/lib/auth-guards";
+import { registrarAuditoria } from "@/lib/audit";
+import { AppError, mensagemDeErro } from "@/lib/errors";
+import {
+  calcularItemVenda,
+  calcularTroco,
+  totalVenda,
+} from "@/lib/pdv-utils";
 import { prisma } from "@/lib/prisma";
 
 export type FinalizarItemInput = {
@@ -28,24 +34,6 @@ export type FinalizarVendaResult = {
   total?: number;
   troco?: number;
 };
-
-/**
- * Valida quantidade conforme a unidade de venda do produto.
- *
- * @param quantidade - Quantidade enviada pelo PDV.
- * @param unidadeVenda - `UNIDADE` (inteiro) ou `KG` (decimal > 0).
- * @returns `true` se a quantidade for válida.
- */
-function quantidadeValida(
-  quantidade: number,
-  unidadeVenda: UnidadeVenda,
-): boolean {
-  if (!Number.isFinite(quantidade) || quantidade <= 0) return false;
-  if (unidadeVenda === UnidadeVenda.UNIDADE) {
-    return Number.isInteger(quantidade);
-  }
-  return quantidade <= 999999;
-}
 
 /**
  * Finaliza a venda: valida estoque, recalcula preços (incl. promoção),
@@ -95,7 +83,7 @@ export async function finalizarVendaAction(
         where: { codigoVenda: input.codigoVenda },
       });
       if (existente) {
-        throw new Error(
+        throw new AppError(
           "Código de venda já utilizado. Inicie uma nova venda (F2).",
         );
       }
@@ -107,33 +95,16 @@ export async function finalizarVendaAction(
           where: { id: item.produtoId },
         });
         if (!produto) {
-          throw new Error("Produto não encontrado no estoque.");
+          throw new AppError("Produto não encontrado no estoque.");
         }
 
-        const qty = Number(
-          item.quantidade.toFixed(
-            produto.unidadeVenda === UnidadeVenda.KG ? 3 : 0,
-          ),
-        );
-        if (!quantidadeValida(qty, produto.unidadeVenda)) {
-          throw new Error(
-            produto.unidadeVenda === UnidadeVenda.KG
-              ? `Peso inválido para "${produto.nome}".`
-              : `Quantidade inválida para "${produto.nome}".`,
-          );
-        }
-
-        const estoque = Number(produto.quantidadeEstoque);
-        if (estoque < qty) {
-          throw new Error(
-            `Estoque insuficiente para "${produto.nome}" (disponível: ${estoque}, pedido: ${qty}).`,
-          );
-        }
-
-        const precoNormal = Number(produto.precoUnitario);
-        const unitario = precoEfetivo(
-          precoNormal,
-          {
+        const calculo = calcularItemVenda({
+          nome: produto.nome,
+          quantidade: item.quantidade,
+          unidadeVenda:
+            produto.unidadeVenda === UnidadeVenda.KG ? "KG" : "UNIDADE",
+          precoNormal: Number(produto.precoUnitario),
+          promocao: {
             promocaoAtiva:
               produto.promocaoAtiva &&
               produto.unidadeVenda === UnidadeVenda.UNIDADE,
@@ -143,14 +114,25 @@ export async function finalizarVendaAction(
                 ? null
                 : Number(produto.precoPromocional),
           },
-          qty,
-        );
+        });
+        if (!calculo.ok) {
+          throw new AppError(calculo.message);
+        }
+
+        const { quantidade: qty, precoUnitario: unitario, precoTotal } = calculo;
+
+        const estoque = Number(produto.quantidadeEstoque);
+        if (estoque < qty) {
+          throw new AppError(
+            `Estoque insuficiente para "${produto.nome}" (disponível: ${estoque}, pedido: ${qty}).`,
+          );
+        }
 
         itensResolvidos.push({
           produtoId: item.produtoId,
           quantidade: qty,
           precoUnitario: unitario,
-          precoTotal: Number((qty * unitario).toFixed(2)),
+          precoTotal,
         });
 
         const qtyDecimal = new Prisma.Decimal(qty.toFixed(3));
@@ -164,25 +146,21 @@ export async function finalizarVendaAction(
           },
         });
         if (updated.count === 0) {
-          throw new Error(
+          throw new AppError(
             `Estoque insuficiente para "${produto.nome}". Tente novamente.`,
           );
         }
       }
 
-      const totalCalculado = Number(
-        itensResolvidos
-          .reduce((acc, i) => acc + i.precoTotal, 0)
-          .toFixed(2),
-      );
+      const totalCalculado = totalVenda(itensResolvidos);
 
       let trocoCalculado = 0;
       if (input.formaPagamento === PaymentMethod.DINHEIRO) {
-        const pago = input.valorPago ?? 0;
-        if (pago < totalCalculado) {
-          throw new Error("Valor pago insuficiente para o total da venda.");
+        const trocoResult = calcularTroco(totalCalculado, input.valorPago ?? 0);
+        if (!trocoResult.ok) {
+          throw new AppError(trocoResult.message);
         }
-        trocoCalculado = Number((pago - totalCalculado).toFixed(2));
+        trocoCalculado = trocoResult.troco;
       }
 
       const vendaCriada = await tx.sale.create({
@@ -219,10 +197,110 @@ export async function finalizarVendaAction(
       troco,
     };
   } catch (error) {
+    if (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === "P2002"
+    ) {
+      return {
+        ok: false,
+        message:
+          "Código de venda já utilizado (concorrência). Inicie uma nova venda (F2).",
+      };
+    }
     return {
       ok: false,
-      message:
-        error instanceof Error ? error.message : "Erro ao finalizar a venda.",
+      message: mensagemDeErro(error, "Erro ao finalizar a venda."),
+    };
+  }
+}
+
+export type CancelarVendaResult = {
+  ok: boolean;
+  message: string;
+};
+
+/**
+ * Cancela uma venda concluída (somente ADMIN): devolve estoque, marca
+ * `CANCELADA` e registra auditoria numa única transação.
+ *
+ * @param vendaId - Id da venda a cancelar.
+ * @param motivo - Motivo obrigatório (mínimo 5 caracteres).
+ * @returns Resultado com sucesso/erro (cancelamento duplicado falha com mensagem clara).
+ */
+export async function cancelarVendaAction(
+  vendaId: string,
+  motivo: string,
+): Promise<CancelarVendaResult> {
+  try {
+    const session = await requireAdmin();
+    const motivoTrim = motivo.trim();
+    if (!vendaId) {
+      return { ok: false, message: "Venda inválida." };
+    }
+    if (motivoTrim.length < 5) {
+      return {
+        ok: false,
+        message: "Informe o motivo do cancelamento (mínimo 5 caracteres).",
+      };
+    }
+
+    await prisma.$transaction(async (tx) => {
+      const venda = await tx.sale.findUnique({
+        where: { id: vendaId },
+        include: { itens: true },
+      });
+
+      if (!venda) {
+        throw new AppError("Venda não encontrada.");
+      }
+      if (venda.status === SaleStatus.CANCELADA) {
+        throw new AppError("Esta venda já foi cancelada.");
+      }
+      if (venda.status !== SaleStatus.CONCLUIDA) {
+        throw new AppError("Somente vendas concluídas podem ser canceladas.");
+      }
+
+      for (const item of venda.itens) {
+        await tx.product.update({
+          where: { id: item.produtoId },
+          data: {
+            quantidadeEstoque: { increment: item.quantidade },
+          },
+        });
+      }
+
+      await tx.sale.update({
+        where: { id: vendaId },
+        data: {
+          status: SaleStatus.CANCELADA,
+          canceladoEm: new Date(),
+          canceladoPorId: session.user.id,
+          motivoCancelamento: motivoTrim,
+        },
+      });
+
+      await registrarAuditoria(tx, {
+        usuarioId: session.user.id,
+        acao: "VENDA_CANCELADA",
+        entidade: "Sale",
+        entidadeId: vendaId,
+        detalhes: {
+          codigoVenda: venda.codigoVenda,
+          total: Number(venda.total),
+          motivo: motivoTrim,
+          itens: venda.itens.map((i) => ({
+            produtoId: i.produtoId,
+            quantidade: Number(i.quantidade),
+          })),
+        },
+      });
+    });
+
+    return { ok: true, message: "Venda cancelada e estoque devolvido." };
+  } catch (error) {
+    return {
+      ok: false,
+      message: mensagemDeErro(error, "Erro ao cancelar a venda."),
     };
   }
 }

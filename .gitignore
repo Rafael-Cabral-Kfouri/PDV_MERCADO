@@ -48,3 +48,6 @@ next-env.d.ts
 # uploads de produtos (mantém a pasta)
 /public/uploads/produtos/*
 !/public/uploads/produtos/.gitkeep
+
+# backups locais (backup-pdv.bat)
+/backups/

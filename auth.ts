@@ -2,6 +2,11 @@ import NextAuth from "next-auth";
 import Credentials from "next-auth/providers/credentials";
 import bcrypt from "bcryptjs";
 import { authConfig } from "@/auth.config";
+import {
+  limparTentativasLogin,
+  registrarFalhaLogin,
+  verificarBloqueioLogin,
+} from "@/lib/login-rate-limit";
 import { prisma } from "@/lib/prisma";
 
 /**
@@ -19,6 +24,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       },
       /**
        * Valida e-mail/senha contra o banco e retorna o usuário autenticado.
+       * Respeita o limite de 5 falhas / 15 min por e-mail (Map em memória).
        *
        * @param credentials - Objeto com `email` e `password` enviados no login.
        * @returns Dados públicos do usuário (id, email, nome, funcao) ou `null` se inválido.
@@ -36,11 +42,27 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           return null;
         }
 
-        const user = await prisma.user.findUnique({ where: { email } });
-        if (!user) return null;
+        const emailNorm = email.trim().toLowerCase();
+        const bloqueio = verificarBloqueioLogin(emailNorm);
+        if (bloqueio.bloqueado) {
+          return null;
+        }
+
+        const user = await prisma.user.findUnique({
+          where: { email: emailNorm },
+        });
+        if (!user) {
+          registrarFalhaLogin(emailNorm);
+          return null;
+        }
 
         const senhaValida = await bcrypt.compare(password, user.senhaHash);
-        if (!senhaValida) return null;
+        if (!senhaValida) {
+          registrarFalhaLogin(emailNorm);
+          return null;
+        }
+
+        limparTentativasLogin(emailNorm);
 
         return {
           id: user.id,
